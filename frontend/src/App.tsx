@@ -1,35 +1,38 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import { ThemeProvider, createTheme } from '@mui/material/styles';
+import CssBaseline from '@mui/material/CssBaseline';
+import RegistrationPage from './pages/RegistrationPage';
+
+// 1. Определение базовой темы
+const theme = createTheme({
+  palette: {
+    mode: 'light', // Или 'dark'
+    primary: {
+      main: '#536525', 
+    },
+    secondary: {
+      main: '#5b6147',
+    },
+    background: {
+      default: '#fafaee',
+      paper: '#fafaee',
+    },
+  },
+  typography: {
+    fontFamily: 'Inter, sans-serif',
+  }
+});
 
 function App() {
-  const [count, setCount] = useState(0)
-
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
+    // 2. Оборачиваем приложение в ThemeProvider и CssBaseline
+    <ThemeProvider theme={theme}>
+      <CssBaseline /> {/* Сбрасывает стили и применяет фон темы */}
+      
+      {/* 3. Здесь будет  компонент страницы регистрации */}
+      <RegistrationPage />
+    
+    </ThemeProvider>
+  );
 }
 
 export default App

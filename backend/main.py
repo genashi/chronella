@@ -2,10 +2,9 @@
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware # Для связи React и FastAPI
-
-# !!! НОВЫЕ ИМПОРТЫ !!!
 from app import models
 from app.database import engine
+from app.routers import auth
 
 # Создаем все таблицы, которые наследуются от Base, в базе данных
 # Это создает файл database.db, если он еще не существует.
@@ -37,6 +36,8 @@ app.add_middleware(
 @app.get("/")
 def read_root():
     return {"message": "Hello from Chronella FastAPI Backend!"}
+
+app.include_router(auth.router)
 
 # Документация: FastAPI автоматически создает интерактивную документацию
 # Ее можно будет посмотреть по адресу: http://127.0.0.1:8000/docs
