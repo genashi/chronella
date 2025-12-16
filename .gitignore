@@ -1,0 +1,26 @@
+# слэш на конце значит игнорить папку
+# звезда в начале значит игнорировать все подобное, применяется к расширениям файлов
+
+# личные файлы
+_Dd/
+_Reference/
+
+# питон
+.venv/                  
+__pycache__/
+*.pyc
+.mypy_cache/
+
+# реакт
+node_modules/
+# Результат сборки Vite
+frontend/dist/    
+      
+# Логи
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# база данных
+backend/database.db
+
