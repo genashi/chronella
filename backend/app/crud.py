@@ -1,9 +1,5 @@
 from sqlalchemy.orm import Session
 from . import models, schemas
-from passlib.context import CryptContext
-
-# 1. Настройка контекста для хеширования паролей
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # --- Утилиты для паролей ---
 

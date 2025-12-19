@@ -18,7 +18,25 @@ const theme = createTheme({
     },
   },
   typography: {
-    fontFamily: 'Inter, sans-serif',
+    fontFamily: '"Inter", "Roboto", "Helvetica", "Arial", sans-serif', // Базовый шрифт (Inter)
+    h1: {
+      fontFamily: '"Lora", serif', // Заголовки Lora
+    },
+    h2: {
+      fontFamily: '"Lora", serif',
+    },
+    h3: {
+      fontFamily: '"Lora", serif',
+    },
+    h4: {
+      fontFamily: '"Lora", serif',
+    },
+    h5: {
+      fontFamily: '"Lora", serif',
+    },
+    h6: {
+      fontFamily: '"Lora", serif',
+    },
   }
 });
 

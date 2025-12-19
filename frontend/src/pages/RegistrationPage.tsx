@@ -60,10 +60,10 @@ const RegistrationPage: React.FC = () => {
 
   return (
     <Container component="main" maxWidth="xs">
-      <Paper elevation={3} sx={{ padding: 4, marginTop: 8, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+      <Paper elevation={5} sx={{ padding: 4, marginTop: 8, display: 'flex', flexDirection: 'column', alignItems: 'left' }}>
         <PersonAdd color="primary" sx={{ fontSize: 40, mb: 1 }} />
-        <Typography component="h1" variant="h5" sx={{ mb: 3 }}>
-          Регистрация студента
+        <Typography component="h1" variant="h4" sx={{ mb: 3 }}>
+          Регистрация
         </Typography>
         
         {/* Поле для вывода сообщений */}
