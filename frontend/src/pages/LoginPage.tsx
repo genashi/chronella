@@ -1,16 +1,15 @@
 import React, { useState } from 'react';
 import { Box, TextField, Button, Typography, Paper, Alert, Link } from '@mui/material';
-import { PersonAdd } from '@mui/icons-material'; // Иконка для кнопки
+import { Login as LoginIcon } from '@mui/icons-material';
 import { Link as RouterLink } from 'react-router-dom';
 
 // Адрес нашего FastAPI бэкенда
-const API_URL = 'http://localhost:8000/auth/register';
+const API_URL = 'http://localhost:8000/auth/login';
 
-const RegistrationPage: React.FC = () => {
+const LoginPage: React.FC = () => {
   // Состояния для хранения введенных данных
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
   
   // Состояния для обратной связи
   const [message, setMessage] = useState<{ text: string, type: 'success' | 'error' } | null>(null);
@@ -21,88 +20,52 @@ const RegistrationPage: React.FC = () => {
     setLoading(true);
     setMessage(null);
 
-    // Валидация совпадения паролей
-    if (password !== confirmPassword) {
-      setMessage({ 
-        text: 'Пароли не совпадают. Пожалуйста, проверьте введенные данные.', 
-        type: 'error' 
-      });
-      setLoading(false);
-      return;
-    }
-
-    // Валидация минимальной длины пароля
-    if (password.length < 6) {
-      setMessage({ 
-        text: 'Пароль должен содержать минимум 6 символов.', 
-        type: 'error' 
-      });
-      setLoading(false);
-      return;
-    }
-
     try {
+      // OAuth2PasswordRequestForm ожидает form-urlencoded данные
+      // username - это email в нашем случае
+      const formData = new URLSearchParams();
+      formData.append('username', email);
+      formData.append('password', password);
+
       const response = await fetch(API_URL, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/x-www-form-urlencoded',
         },
-        // Отправляем данные в формате JSON, который ожидает FastAPI
-        body: JSON.stringify({ email, password }),
+        body: formData.toString(),
       });
 
-      // Проверяем, является ли ответ JSON
-      const contentType = response.headers.get('content-type');
-      let data;
-      
-      if (contentType && contentType.includes('application/json')) {
-        try {
-          data = await response.json();
-        } catch (jsonError) {
-          const text = await response.text();
-          throw new Error(`Failed to parse JSON response: ${text}`);
-        }
-      } else {
-        const text = await response.text();
-        throw new Error(`Server returned non-JSON response: ${text}`);
-      }
+      const data = await response.json();
 
       if (response.ok) {
-        // Успешная регистрация (статус 200)
-        setMessage({ 
-          text: `Регистрация прошла успешно! Добро пожаловать, ${data.email}.`, 
-          type: 'success' 
-        });
-        setEmail('');
-        setPassword('');
-        setConfirmPassword('');
+        // Успешный вход
+        if (data.access_token) {
+          localStorage.setItem('access_token', data.access_token);
+          console.log('Success');
+          setMessage({ 
+            text: 'Вход выполнен успешно!', 
+            type: 'success' 
+          });
+        } else {
+          setMessage({ 
+            text: 'Токен не получен от сервера.', 
+            type: 'error' 
+          });
+        }
       } else {
-        // Ошибка регистрации (400, 500 и т.д.)
-        const errorMessage = data?.detail || data?.message || 'Ошибка регистрации. Попробуйте еще раз.';
+        // Ошибка входа
         setMessage({ 
-          text: errorMessage, 
+          text: data.detail || 'Неверный email или пароль.', 
           type: 'error' 
         });
       }
     } catch (error) {
       // Ошибка сети или другая техническая проблема
-      console.error('Registration Error:', error);
-      if (error instanceof TypeError && error.message.includes('fetch')) {
-        setMessage({ 
-          text: 'Не удалось подключиться к серверу. Убедитесь, что бэкенд запущен на http://localhost:8000', 
-          type: 'error' 
-        });
-      } else if (error instanceof Error) {
-        setMessage({ 
-          text: `Ошибка: ${error.message}`, 
-          type: 'error' 
-        });
-      } else {
-        setMessage({ 
-          text: 'Произошла неизвестная ошибка. Попробуйте еще раз.', 
-          type: 'error' 
-        });
-      }
+      console.error('Network Error:', error);
+      setMessage({ 
+        text: 'Не удалось подключиться к серверу. Убедитесь, что бэкенд запущен.', 
+        type: 'error' 
+      });
     } finally {
       setLoading(false);
     }
@@ -134,7 +97,7 @@ const RegistrationPage: React.FC = () => {
       >
         {/* Заголовок и иконка - выровнены влево */}
         <Box sx={{ display: 'flex', alignItems: 'center', mb: 4, alignSelf: 'flex-start' }}>
-          <PersonAdd 
+          <LoginIcon 
             color="primary" 
             sx={{ 
               fontSize: 32, 
@@ -148,7 +111,7 @@ const RegistrationPage: React.FC = () => {
               fontFamily: 'Lora, serif',
             }}
           >
-            Регистрация
+            Вход
           </Typography>
         </Box>
         
@@ -183,7 +146,7 @@ const RegistrationPage: React.FC = () => {
             required
             fullWidth
             id="email"
-            label="Email (для входа)"
+            label="Email"
             name="email"
             autoComplete="email"
             value={email}
@@ -204,31 +167,9 @@ const RegistrationPage: React.FC = () => {
             label="Пароль"
             type="password"
             id="password"
-            autoComplete="new-password"
+            autoComplete="current-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            helperText={password.length > 0 && password.length < 6 ? 'Минимум 6 символов' : ''}
-            error={password.length > 0 && password.length < 6}
-            sx={{
-              maxWidth: 400,
-              '& .MuiOutlinedInput-root': {
-                borderRadius: 2,
-              },
-            }}
-          />
-          <TextField
-            margin="normal"
-            required
-            fullWidth
-            name="confirmPassword"
-            label="Подтвердите пароль"
-            type="password"
-            id="confirmPassword"
-            autoComplete="new-password"
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
-            helperText={confirmPassword.length > 0 && password !== confirmPassword ? 'Пароли не совпадают' : ''}
-            error={confirmPassword.length > 0 && password !== confirmPassword}
             sx={{
               maxWidth: 400,
               '& .MuiOutlinedInput-root': {
@@ -241,7 +182,7 @@ const RegistrationPage: React.FC = () => {
             fullWidth
             variant="contained"
             disabled={loading}
-            startIcon={<PersonAdd />}
+            startIcon={<LoginIcon />}
             sx={{ 
               mt: 4,
               mb: 2,
@@ -258,17 +199,17 @@ const RegistrationPage: React.FC = () => {
               },
             }}
           >
-            {loading ? 'Регистрация...' : 'Зарегистрироваться'}
+            {loading ? 'Вход...' : 'Войти'}
           </Button>
         </Box>
 
-        {/* Ссылка на вход */}
+        {/* Ссылка на регистрацию */}
         <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
           <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-            Есть аккаунт?{' '}
+            Нет аккаунта?{' '}
             <Link 
               component={RouterLink} 
-              to="/login" 
+              to="/register" 
               sx={{ 
                 color: 'primary.main',
                 textDecoration: 'none',
@@ -277,7 +218,7 @@ const RegistrationPage: React.FC = () => {
                 },
               }}
             >
-              Войти
+              Зарегистрироваться
             </Link>
           </Typography>
         </Box>
@@ -286,4 +227,5 @@ const RegistrationPage: React.FC = () => {
   );
 };
 
-export default RegistrationPage;
+export default LoginPage;
+

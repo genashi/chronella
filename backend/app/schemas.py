@@ -22,9 +22,11 @@ class UserOut(BaseModel):
     class Config:
         from_attributes = True # Раньше было orm_mode = True
 
-    class Token(BaseModel):
-        access_token: str
-        token_type: str
+# 3. Схема для JWT токена
+class Token(BaseModel):
+    access_token: str
+    token_type: str
 
-    class TokenData(BaseModel):
-        email: str | None = None
+# 4. Схема для данных токена
+class TokenData(BaseModel):
+    email: str | None = None
