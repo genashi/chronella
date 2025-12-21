@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from fastapi.security import OAuth2PasswordBearer
 from .. import models, database, crud
 from ..services.mrsu import MrsuAPIService
 from ..auth_utils import get_current_user, encrypt_password
