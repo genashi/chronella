@@ -6,7 +6,8 @@ import logging
 
 from .. import schemas, crud, models
 from ..database import get_db
-from ..auth_utils import verify_password, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
+from ..auth_utils import verify_password, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES, get_current_user, encrypt_password
+from ..services.mrsu import MrsuAPIService
 
 logger = logging.getLogger(__name__)
 
@@ -69,4 +70,40 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
     )
     
     return {"access_token": access_token, "token_type": "bearer"}
+
+@router.post("/link-mrsu")
+async def link_mrsu_account(
+    data: dict,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """
+    Привязать аккаунт MRSU (ЭИОС) к текущему пользователю.
+    """
+    # Фронтенд отправляет "login", но также поддерживаем "username" для обратной совместимости
+    username = data.get("login") or data.get("username")
+    password = data.get("password")
+    
+    if not username or not password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing login/username or password"
+        )
+    
+    try:
+        token = await MrsuAPIService.login(username, password)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"MRSU login failed: {str(e)}"
+        )
+    
+    # login успешен, сохраняем данные в профиль пользователя
+    current_user.mrsu_username = username
+    current_user.mrsu_password_encrypted = encrypt_password(password)
+    current_user.is_mrsu_verified = True
+    db.add(current_user)
+    db.commit()
+    db.refresh(current_user)
+    return {"success": True, "mrsu_verified": True}
 
