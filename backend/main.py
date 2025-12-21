@@ -5,11 +5,12 @@ from fastapi.middleware.cors import CORSMiddleware # Для связи React и 
 
 # !!! НОВЫЕ ИМПОРТЫ !!!
 from app import models
-from app.database import engine
+from app.database import engine, Base
+from app.routers import auth
 
 # Создаем все таблицы, которые наследуются от Base, в базе данных
 # Это создает файл database.db, если он еще не существует.
-models.Base.metadata.create_all(bind=engine)
+Base.metadata.create_all(bind=engine)
 
 # Создаем экземпляр приложения FastAPI
 app = FastAPI(
@@ -19,10 +20,13 @@ app = FastAPI(
 )
 
 # Настраиваем CORS
-# Это важно, чтобы React (работающий на порту 3000) мог общаться с FastAPI (на порту 8000).
+# Это важно, чтобы React (работающий на порту 5173 или 3000) мог общаться с FastAPI (на порту 8000).
 origins = [
     "http://localhost",
-    "http://localhost:3000",  # Порт, на котором будет работать React
+    "http://localhost:3000",  # Порт для некоторых React приложений
+    "http://localhost:5173",  # Порт по умолчанию для Vite
+    "http://127.0.0.1:5173",  # Альтернативный адрес для Vite
+    "http://127.0.0.1:3000",  # Альтернативный адрес
 ]
 
 app.add_middleware(
@@ -37,6 +41,9 @@ app.add_middleware(
 @app.get("/")
 def read_root():
     return {"message": "Hello from Chronella FastAPI Backend!"}
+
+# Подключаем роутеры
+app.include_router(auth.router)
 
 # Документация: FastAPI автоматически создает интерактивную документацию
 # Ее можно будет посмотреть по адресу: http://127.0.0.1:8000/docs

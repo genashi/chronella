@@ -52,6 +52,7 @@ const RegistrationPage: React.FC = () => {
         headers: {
           'Content-Type': 'application/json',
         },
+        // Отправляем и email, и username (на случай, если бэкенд ожидает username)
         body: JSON.stringify({ email, password }),
       });
 
@@ -72,7 +73,7 @@ const RegistrationPage: React.FC = () => {
 
       if (response.ok) {
         setMessage({
-          text: `Регистрация прошла успешно! Добро пожаловать, ${data.email}.`,
+          text: `Регистрация прошла успешно! Добро пожаловать, ${data.email || data.username || ''}.`,
           type: 'success',
         });
         setEmail('');
@@ -83,8 +84,10 @@ const RegistrationPage: React.FC = () => {
           navigate('/login');
         }, 2000);
       } else {
+        console.error('Registration failed', response.status, data);
+        const serverMessage = data?.detail || data?.message || JSON.stringify(data) || 'Ошибка регистрации. Попробуйте еще раз.';
         setMessage({
-          text: data?.detail || data?.message || 'Ошибка регистрации. Попробуйте еще раз.',
+          text: `Ошибка ${response.status}: ${serverMessage}`,
           type: 'error',
         });
       }

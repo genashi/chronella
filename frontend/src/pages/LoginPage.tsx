@@ -38,7 +38,21 @@ const LoginPage: React.FC = () => {
         body: formData.toString(),
       });
 
-      const data = await response.json();
+      // Проверяем, является ли ответ JSON
+      const contentType = response.headers.get('content-type');
+      let data;
+
+      if (contentType && contentType.includes('application/json')) {
+        try {
+          data = await response.json();
+        } catch (jsonError) {
+          const text = await response.text();
+          throw new Error(`Failed to parse JSON response: ${text}`);
+        }
+      } else {
+        const text = await response.text();
+        throw new Error(`Server returned non-JSON response: ${text}`);
+      }
 
       if (response.ok) {
         if (data.access_token) {
@@ -59,17 +73,30 @@ const LoginPage: React.FC = () => {
           });
         }
       } else {
+        const errorMessage = data?.detail || data?.message || 'Неверный email или пароль.';
         setMessage({
-          text: data.detail || 'Неверный email или пароль.',
+          text: errorMessage,
           type: 'error',
         });
       }
     } catch (error) {
-      console.error('Network Error:', error);
-      setMessage({
-        text: 'Не удалось подключиться к серверу. Убедитесь, что бэкенд запущен.',
-        type: 'error',
-      });
+      console.error('Login Error:', error);
+      if (error instanceof TypeError && error.message.includes('fetch')) {
+        setMessage({
+          text: 'Не удалось подключиться к серверу. Убедитесь, что бэкенд запущен на http://localhost:8000',
+          type: 'error',
+        });
+      } else if (error instanceof Error) {
+        setMessage({
+          text: `Ошибка: ${error.message}`,
+          type: 'error',
+        });
+      } else {
+        setMessage({
+          text: 'Произошла неизвестная ошибка. Попробуйте еще раз.',
+          type: 'error',
+        });
+      }
     } finally {
       setLoading(false);
     }

@@ -13,6 +13,7 @@ import {
   CircularProgress,
 } from '@mui/material';
 import { Google as GoogleIcon } from '@mui/icons-material';
+import { useNavigate } from 'react-router-dom';
 
 const API_URL = 'http://localhost:8000';
 
@@ -22,6 +23,7 @@ interface ProfileStatus {
 }
 
 const SetupPage: React.FC = () => {
+  const navigate = useNavigate();
   const [activeStep, setActiveStep] = useState(0);
   const [mrsuLogin, setMrsuLogin] = useState('');
   const [mrsuPassword, setMrsuPassword] = useState('');
@@ -38,7 +40,11 @@ const SetupPage: React.FC = () => {
     const fetchProfileStatus = async () => {
       try {
         const token = localStorage.getItem('access_token');
-        if (!token) return;
+        if (!token) {
+          // Если нет токена, перенаправляем на страницу входа
+          navigate('/login');
+          return;
+        }
 
         const response = await fetch(`${API_URL}/auth/profile`, {
           headers: {
@@ -61,14 +67,20 @@ const SetupPage: React.FC = () => {
           } else {
             setActiveStep(2);
           }
+        } else if (response.status === 401) {
+          // Токен недействителен, перенаправляем на логин
+          localStorage.removeItem('access_token');
+          navigate('/login');
         }
       } catch (err) {
         console.error('Error fetching profile status:', err);
+        // При ошибке сети тоже перенаправляем на логин
+        navigate('/login');
       }
     };
 
     fetchProfileStatus();
-  }, []);
+  }, [navigate]);
 
   const handleMrsuSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -96,7 +108,21 @@ const SetupPage: React.FC = () => {
         }),
       });
 
-      const data = await response.json();
+      // Проверяем, является ли ответ JSON
+      const contentType = response.headers.get('content-type');
+      let data;
+
+      if (contentType && contentType.includes('application/json')) {
+        try {
+          data = await response.json();
+        } catch (jsonError) {
+          const text = await response.text();
+          throw new Error(`Failed to parse JSON response: ${text}`);
+        }
+      } else {
+        const text = await response.text();
+        throw new Error(`Server returned non-JSON response: ${text}`);
+      }
 
       if (response.ok) {
         setSuccess('Учетные данные ЭИОС успешно привязаны!');
@@ -104,11 +130,20 @@ const SetupPage: React.FC = () => {
         setMrsuLogin('');
         setMrsuPassword('');
         setActiveStep(1);
+      } else if (response.status === 401) {
+        // Токен недействителен
+        localStorage.removeItem('access_token');
+        navigate('/login');
       } else {
-        setError(data.detail || 'Ошибка при привязке учетных данных ЭИОС');
+        setError(data?.detail || data?.message || 'Ошибка при привязке учетных данных ЭИОС');
       }
     } catch (err) {
-      setError('Не удалось подключиться к серверу. Убедитесь, что бэкенд запущен.');
+      console.error('Error linking MRSU:', err);
+      if (err instanceof Error) {
+        setError(`Ошибка: ${err.message}`);
+      } else {
+        setError('Не удалось подключиться к серверу. Убедитесь, что бэкенд запущен.');
+      }
     } finally {
       setLoading(false);
     }
