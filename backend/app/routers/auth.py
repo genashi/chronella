@@ -9,12 +9,9 @@ from google_auth_oauthlib.flow import Flow
 
 from .. import schemas, crud, models
 from ..database import get_db
-from ..models import User
+from ..auth_utils import verify_password, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES, get_current_user
 from ..core.security import encrypt_password
-from ..services.mrsu_auth import mrsu_service # Импортируем наш сервис
-from ..auth_utils import get_current_user 
-from ..auth_utils import verify_password, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES, get_current_user, encrypt_password
-from ..services.mrsu_auth import get_mrsu_token  # Используем правильную функцию
+from ..services.mrsu_auth import mrsu_service
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +65,7 @@ async def link_mrsu_account_new(
 ):
     """
     Привязка аккаунта MRSU по username и password (POST /users/link-mrsu).
-    Проверяет валидность пароля через get_mrsu_token,
+    Проверяет валидность пароля через mrsu_service.authenticate,
     если ок — шифрует пароль, обновляет пользователя, возвращает обновлённого пользователя.
     """
     username = data.get("username")
@@ -79,12 +76,16 @@ async def link_mrsu_account_new(
             detail="Missing username or password"
         )
     try:
-        token_json = await get_mrsu_token(username, password)
-        if not token_json or not token_json.get("access_token"):
+        # Аутентификация через MRSU API
+        auth_result = await mrsu_service.authenticate(username, password)
+        if not auth_result or not auth_result.get("access_token"):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="MRSU authentication failed: invalid username or password"
             )
+    except HTTPException:
+        # Пробрасываем HTTPException дальше
+        raise
     except Exception as e:
         logger.error(f"MRSU authentication failed: {str(e)}", exc_info=True)
         raise HTTPException(

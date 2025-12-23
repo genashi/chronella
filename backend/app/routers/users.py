@@ -1,15 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from .. import models, database, crud
-from ..services.mrsu import MrsuAPIService
-from ..auth_utils import get_current_user, encrypt_password
 from pydantic import BaseModel
 
+from .. import models, crud
 from ..database import get_db
-from ..models import User
+from ..auth_utils import get_current_user
 from ..core.security import encrypt_password
-from ..services.mrsu_auth import mrsu_service # Импортируем наш сервис
-from ..auth_utils import get_current_user # Твоя функция получения юзера из JWT
+from ..services.mrsu_auth import mrsu_service
 
 router = APIRouter(
     prefix="/users",
@@ -23,7 +20,7 @@ class MRSULoginRequest(BaseModel):
 @router.post("/link-mrsu")
 async def link_mrsu_account(
     credentials: MRSULoginRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     # 1. Вызываем наш сервис (он сам проверит пароль в вузе)
