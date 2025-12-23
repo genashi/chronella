@@ -29,7 +29,7 @@ class MRSUAuthService:
         #}
 
         # Используем httpx.AsyncClient для асинхронных запросов
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(verify=False, timeout=httpx.Timeout(30.0)) as client:
             response = await client.post(
                 "https://p.mrsu.ru/OAuth/Token",
                 data={
