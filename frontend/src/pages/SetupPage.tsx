@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Card,
@@ -20,68 +20,82 @@ const API_URL = 'http://localhost:8000';
 interface ProfileStatus {
   mrsu_linked: boolean;
   google_linked: boolean;
+  is_mrsu_verified?: boolean;
 }
 
 const SetupPage: React.FC = () => {
   const navigate = useNavigate();
+
+  // Current step (0 - ЭИОС, 1 - Google, 2 - Готово)
   const [activeStep, setActiveStep] = useState(0);
+
+  // Form fields
   const [mrsuLogin, setMrsuLogin] = useState('');
   const [mrsuPassword, setMrsuPassword] = useState('');
+
+  // UI status
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  // User flags in DB
   const [profileStatus, setProfileStatus] = useState<ProfileStatus>({
     mrsu_linked: false,
     google_linked: false,
   });
 
-  // Загружаем статус профиля
-  useEffect(() => {
-    const fetchProfileStatus = async () => {
-      try {
-        const token = localStorage.getItem('access_token');
-        if (!token) {
-          // Если нет токена, перенаправляем на страницу входа
-          navigate('/login');
-          return;
-        }
+  /**
+   * Получение статуса профиля из БД, корректирует stepper.
+   * Показывает Google шаг если is_mrsu_verified === true.
+   */
+  const fetchProfileStatus = useCallback(async () => {
+    try {
+      const token = localStorage.getItem('access_token');
+      if (!token) {
+        navigate('/login');
+        return;
+      }
+      const response = await fetch(`${API_URL}/auth/profile`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
 
-        const response = await fetch(`${API_URL}/auth/profile`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
+      if (response.ok) {
+        const data = await response.json();
+        const nextStatus: ProfileStatus = {
+          mrsu_linked: !!data.mrsu_linked,
+          google_linked: !!data.google_linked,
+          is_mrsu_verified: !!data.is_mrsu_verified,
+        };
+        setProfileStatus(nextStatus);
 
-        if (response.ok) {
-          const data = await response.json();
-          setProfileStatus({
-            mrsu_linked: data.mrsu_linked || false,
-            google_linked: data.google_linked || false,
-          });
-
-          // Определяем активный шаг на основе статуса
-          if (!data.mrsu_linked) {
-            setActiveStep(0);
-          } else if (!data.google_linked) {
+        // Проверка для skip ЭИОС шага
+        if (nextStatus.is_mrsu_verified || nextStatus.mrsu_linked) {
+          // Привязка ЭИОС уже подтверждена
+          if (!nextStatus.google_linked) {
             setActiveStep(1);
           } else {
             setActiveStep(2);
           }
-        } else if (response.status === 401) {
-          // Токен недействителен, перенаправляем на логин
-          localStorage.removeItem('access_token');
-          navigate('/login');
+        } else {
+          setActiveStep(0);
         }
-      } catch (err) {
-        console.error('Error fetching profile status:', err);
-        // При ошибке сети тоже перенаправляем на логин
+      } else if (response.status === 401) {
+        localStorage.removeItem('access_token');
         navigate('/login');
+      } else {
+        setError('Ошибка при получении данных профиля.');
       }
-    };
-
-    fetchProfileStatus();
+    } catch (err) {
+      navigate('/login');
+    }
   }, [navigate]);
 
+  useEffect(() => {
+    fetchProfileStatus();
+    // eslint-disable-next-line
+  }, [fetchProfileStatus]);
+
+  // ---- Шаг 1. Привязка ЭИОС
   const handleMrsuSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setLoading(true);
@@ -95,7 +109,6 @@ const SetupPage: React.FC = () => {
         setLoading(false);
         return;
       }
-
       const response = await fetch(`${API_URL}/auth/link-mrsu`, {
         method: 'POST',
         headers: {
@@ -108,10 +121,8 @@ const SetupPage: React.FC = () => {
         }),
       });
 
-      // Проверяем, является ли ответ JSON
       const contentType = response.headers.get('content-type');
       let data;
-
       if (contentType && contentType.includes('application/json')) {
         try {
           data = await response.json();
@@ -126,19 +137,22 @@ const SetupPage: React.FC = () => {
 
       if (response.ok) {
         setSuccess('Учетные данные ЭИОС успешно привязаны!');
-        setProfileStatus((prev) => ({ ...prev, mrsu_linked: true }));
         setMrsuLogin('');
         setMrsuPassword('');
+        // При успехе сразу переводим на шаг Google
         setActiveStep(1);
+        setProfileStatus((prev) => ({
+          ...prev,
+          mrsu_linked: true,
+          is_mrsu_verified: true,
+        }));
       } else if (response.status === 401) {
-        // Токен недействителен
         localStorage.removeItem('access_token');
         navigate('/login');
       } else {
         setError(data?.detail || data?.message || 'Ошибка при привязке учетных данных ЭИОС');
       }
     } catch (err) {
-      console.error('Error linking MRSU:', err);
       if (err instanceof Error) {
         setError(`Ошибка: ${err.message}`);
       } else {
@@ -149,28 +163,42 @@ const SetupPage: React.FC = () => {
     }
   };
 
-  const handleGoogleLogin = () => {
-    // Редирект на Google OAuth
+  // ---- Шаг 2. Привязка Google через переадресацию — только кнопка!
+  const handleGoogleRedirect = () => {
     window.location.href = `${API_URL}/auth/google/login`;
   };
 
+  // --- После Google OAuth если фронт был редиректнут, повторно refetch
+  useEffect(() => {
+    const hash = window.location.hash || window.location.search;
+    if (
+      (hash && hash.includes('google_oauth')) ||
+      window.location.pathname.endsWith('/setup')
+    ) {
+      fetchProfileStatus();
+    }
+    // eslint-disable-next-line
+  }, []);
+
+  // Шаг 3. Готово
   const handleGoToDashboard = () => {
-    // Переход в личный кабинет
-    window.location.href = '/dashboard';
+    navigate('/dashboard');
   };
 
   const steps = [
     {
       label: 'Привязка ЭИОС',
-      completed: profileStatus.mrsu_linked,
+      completed: profileStatus.is_mrsu_verified || profileStatus.mrsu_linked,
     },
     {
-      label: 'Вход через Google',
+      label: 'Привязка Google',
       completed: profileStatus.google_linked,
     },
+    {
+      label: 'Все готово',
+      completed: (profileStatus.is_mrsu_verified || profileStatus.mrsu_linked) && profileStatus.google_linked,
+    },
   ];
-
-  const allStepsCompleted = profileStatus.mrsu_linked && profileStatus.google_linked;
 
   return (
     <Box
@@ -259,7 +287,7 @@ const SetupPage: React.FC = () => {
                 value={mrsuLogin}
                 onChange={(e) => setMrsuLogin(e.target.value)}
                 autoFocus
-                disabled={loading || profileStatus.mrsu_linked}
+                disabled={loading}
                 sx={{
                   mb: 2,
                   '& .MuiOutlinedInput-root': {
@@ -279,7 +307,7 @@ const SetupPage: React.FC = () => {
                 autoComplete="current-password"
                 value={mrsuPassword}
                 onChange={(e) => setMrsuPassword(e.target.value)}
-                disabled={loading || profileStatus.mrsu_linked}
+                disabled={loading}
                 sx={{
                   mb: 3,
                   '& .MuiOutlinedInput-root': {
@@ -292,7 +320,7 @@ const SetupPage: React.FC = () => {
                 type="submit"
                 fullWidth
                 variant="contained"
-                disabled={loading || profileStatus.mrsu_linked}
+                disabled={loading}
                 sx={{
                   borderRadius: 2,
                   textTransform: 'none',
@@ -309,8 +337,6 @@ const SetupPage: React.FC = () => {
               >
                 {loading ? (
                   <CircularProgress size={24} color="inherit" />
-                ) : profileStatus.mrsu_linked ? (
-                  'Уже привязано'
                 ) : (
                   'Привязать ЭИОС'
                 )}
@@ -318,7 +344,7 @@ const SetupPage: React.FC = () => {
             </Box>
           )}
 
-          {/* Шаг 2: Вход через Google */}
+          {/* Шаг 2: Привязка Google */}
           {activeStep === 1 && (
             <Box>
               <Typography
@@ -336,7 +362,7 @@ const SetupPage: React.FC = () => {
                 fullWidth
                 variant="outlined"
                 startIcon={<GoogleIcon />}
-                onClick={handleGoogleLogin}
+                onClick={handleGoogleRedirect}
                 disabled={profileStatus.google_linked}
                 sx={{
                   borderRadius: 2,
@@ -354,14 +380,23 @@ const SetupPage: React.FC = () => {
               >
                 {profileStatus.google_linked
                   ? 'Google аккаунт привязан'
-                  : 'Войти через Google'}
+                  : 'Привязать Google Календарь'}
               </Button>
             </Box>
           )}
 
-          {/* Кнопка перехода в личный кабинет */}
-          {allStepsCompleted && (
-            <Box sx={{ mt: 4 }}>
+          {/* Шаг 3: Готово */}
+          {activeStep === 2 && (
+            <Box sx={{ mt: 4, textAlign: 'center' }}>
+              <Typography
+                variant="h5"
+                sx={{ mb: 2, fontFamily: 'Lora, serif', color: 'success.main' }}
+              >
+                Все системы готовы!
+              </Typography>
+              <Typography sx={{ mb: 4, color: 'text.secondary', fontFamily: 'Inter, sans-serif' }}>
+                Вы успешно прошли настройку. Теперь можно перейти в личный кабинет.
+              </Typography>
               <Button
                 fullWidth
                 variant="contained"
@@ -391,4 +426,3 @@ const SetupPage: React.FC = () => {
 };
 
 export default SetupPage;
-
