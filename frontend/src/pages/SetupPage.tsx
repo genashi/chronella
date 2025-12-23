@@ -116,7 +116,7 @@ const SetupPage: React.FC = () => {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          login: mrsuLogin,
+          username: mrsuLogin,
           password: mrsuPassword,
         }),
       });

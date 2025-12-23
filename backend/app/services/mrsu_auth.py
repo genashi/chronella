@@ -20,61 +20,31 @@ class MRSUAuthService:
         
         # --- ШАГ 1: Получение токена ---
         # Формируем данные как для обычной HTML формы (не JSON!)
-        payload = {
-            "grant_type": "password",
-            "username": username,
-            "password": password,
-            "client_id": 8,
-            "client_secret": "qweasd",
-        }
+        #payload = {
+            #"grant_type": "password",
+            #"username": username,
+           # "password": password,
+            #"client_id": 8,
+            #"client_secret": "qweasd",
+        #}
 
         # Используем httpx.AsyncClient для асинхронных запросов
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            try:
-                logger.info(f"Attempting login to MRSU for user: {username}")
-                
-                response = await client.post(
-                    self.AUTH_URL,
-                    data=payload,  # ВАЖНО: используем data=, а не json=
-                    headers={
-                        "Content-Type": "application/x-www-form-urlencoded",
-                        "User-Agent": "Chronella-App/1.0" # Представляемся прилично
-                    }
-                )
-
-                # Если вуз вернул 404 тут — значит URL AUTH_URL неверен
-                if response.status_code == 404:
-                    logger.error(f"MRSU Auth Endpoint not found: {self.AUTH_URL}")
-                    raise HTTPException(
-                        status_code=502, 
-                        detail="Ошибка подключения к серверу МГУ (Auth URL 404)"
-                    )
-                
-                # Если пароль неверный, API обычно возвращает 400
-                if response.status_code != 200:
-                    logger.error(f"MRSU Auth failed: {response.text}")
-                    raise HTTPException(
-                        status_code=400, 
-                        detail="Неверный логин или пароль от ЭИОС"
-                    )
-
-                token_data = response.json()
-                access_token = token_data.get("access_token")
-                
-                if not access_token:
-                    raise HTTPException(status_code=502, detail="Сервер МГУ не выдал токен")
-
-                # --- ШАГ 2: Проверка токена (получение ФИО) ---
-                user_info = await self.get_user_info(access_token)
-                
-                return {
-                    "access_token": access_token,
-                    "mrsu_user_data": user_info
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "https://p.mrsu.ru/OAuth/Token",
+                data={
+                    "grant_type": "password",
+                    "username": username,
+                    "password": password,
+                    "client_id": 8,  # Замени на реальный
+                    "client_secret": "qweasd"  # Замени на реальный
                 }
-
-            except httpx.RequestError as e:
-                logger.error(f"Connection error: {e}")
-                raise HTTPException(status_code=503, detail="Сервер МГУ недоступен")
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.json().get("error", "Unknown error"))
+            token_data = response.json()
+            # Сохрани token_data['access_token'] в DB для current_user
+            return {"message": "Linked successfully", "token": token_data['access_token']}
 
     async def get_user_info(self, token: str):
         """Получает информацию о пользователе (ФИО, группа)"""

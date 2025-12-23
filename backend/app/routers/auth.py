@@ -41,6 +41,10 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error creating user: {str(e)}"
         )
+@router.get("/profile")
+async def get_profile(current_user: models.User = Depends(get_current_user)):
+
+    return {"id": current_user.id, "email": current_user.email}
 
 @router.post("/login", response_model=schemas.Token)
 def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
@@ -57,7 +61,7 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
-@router.post("/users/link-mrsu", response_model=schemas.UserOut)
+@router.post("/auth/link-mrsu", response_model=schemas.UserOut)
 async def link_mrsu_account_new(
     data: dict,
     db: Session = Depends(get_db),
