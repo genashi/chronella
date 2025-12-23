@@ -23,7 +23,9 @@ class MRSUAuthService:
         payload = {
             "grant_type": "password",
             "username": username,
-            "password": password
+            "password": password,
+            "client_id": 8,
+            "client_secret": "qweasd",
         }
 
         # Используем httpx.AsyncClient для асинхронных запросов

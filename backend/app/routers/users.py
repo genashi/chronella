@@ -9,7 +9,7 @@ from ..core.security import encrypt_password
 from ..services.mrsu_auth import mrsu_service
 
 router = APIRouter(
-    prefix="/users",
+    prefix="/auth",
     tags=["Users"],
 )
 # Pydantic схема для входных данных
