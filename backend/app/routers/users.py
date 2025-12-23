@@ -3,41 +3,51 @@ from sqlalchemy.orm import Session
 from .. import models, database, crud
 from ..services.mrsu import MrsuAPIService
 from ..auth_utils import get_current_user, encrypt_password
+from pydantic import BaseModel
+
+from ..database import get_db
+from ..models import User
+from ..core.security import encrypt_password
+from ..services.mrsu_auth import mrsu_service # Импортируем наш сервис
+from ..auth_utils import get_current_user # Твоя функция получения юзера из JWT
 
 router = APIRouter(
     prefix="/users",
     tags=["Users"],
 )
+# Pydantic схема для входных данных
+class MRSULoginRequest(BaseModel):
+    username: str
+    password: str
 
 @router.post("/link-mrsu")
 async def link_mrsu_account(
-    data: dict,
-    db: Session = Depends(database.get_db),
-    current_user: models.User = Depends(get_current_user)
+    credentials: MRSULoginRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
-    """
-    Привязать аккаунт MRSU к текущему пользователю.
-    """
-    username = data.get("username")
-    password = data.get("password")
-    if not username or not password:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Missing username or password"
-        )
-    try:
-        token = await MrsuAPIService.login(username, password)
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"MRSU login failed: {str(e)}"
-        )
-    # login успешен, сохраняем данные в профиль пользователя
-    current_user.mrsu_username = username
-    current_user.mrsu_password_encrypted = encrypt_password(password)
+    # 1. Вызываем наш сервис (он сам проверит пароль в вузе)
+    result = await mrsu_service.authenticate(credentials.username, credentials.password)
+    
+    # 2. Если мы здесь, значит ошибок не было.
+    # result содержит {"access_token": "...", "mrsu_user_data": {...}}
+    
+    # 3. Шифруем пароль для сохранения
+    encrypted_pwd = encrypt_password(credentials.password)
+    
+    # 4. Обновляем пользователя в БД
+    current_user.mrsu_username = credentials.username
+    current_user.mrsu_password_encrypted = encrypted_pwd
     current_user.is_mrsu_verified = True
-    db.add(current_user)
+    
+    # Можно сохранить ID студента, если он есть в ответе
+    # current_user.student_id = str(result['mrsu_user_data'].get('Id', ''))
+
     db.commit()
     db.refresh(current_user)
-    return {"success": True, "mrsu_verified": True}
-
+    
+    return {
+        "status": "success",
+        "message": "ЭИОС успешно подключена",
+        "user_info": result['mrsu_user_data']
+    }

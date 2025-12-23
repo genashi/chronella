@@ -2,12 +2,17 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from datetime import timedelta
+from pydantic import BaseModel
 import logging
 import os
 from google_auth_oauthlib.flow import Flow
 
 from .. import schemas, crud, models
 from ..database import get_db
+from ..models import User
+from ..core.security import encrypt_password
+from ..services.mrsu_auth import mrsu_service # Импортируем наш сервис
+from ..auth_utils import get_current_user 
 from ..auth_utils import verify_password, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES, get_current_user, encrypt_password
 from ..services.mrsu_auth import get_mrsu_token  # Используем правильную функцию
 

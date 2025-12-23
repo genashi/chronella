@@ -1,53 +1,50 @@
 import httpx
 
-class MrsuAPIService:
+class MRSUService:
     BASE_URL = "https://papi.mrsu.ru/v1"
+    TOKEN_URL = "https://p.mrsu.ru/OAuth/Token"
+    USER_URL = f"{BASE_URL}/User"
 
     @staticmethod
-    async def login(username: str, password: str) -> str:
-        url = f"{MrsuAPIService.BASE_URL}/Account/Login"
+    async def authenticate_user(username: str, password: str):
+        # 1. Запрос токена
         data = {
+            "grant_type": "password",
             "username": username,
             "password": password
         }
-        try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                response = await client.post(url, json=data)
-                response.raise_for_status()
-                resp_json = response.json()
-                # Ожидается, что токен вернётся в ответе с ключом "token"
-                token = resp_json.get("token")
-                if not token:
-                    raise Exception("Token is missing in the login response")
-                return token
-        except httpx.HTTPStatusError as e:
-            # Например, неправильный логин/пароль – покажем человеческую ошибку
-            raise Exception(f"Login failed: {e.response.status_code} {e.response.text}")
-        except httpx.RequestError:
-            # API не доступно или таймаут
-            raise Exception("Unable to connect to MRSU API. Please try again later.")
-        except Exception as e:
-            raise Exception(f"Unexpected error during login: {str(e)}")
-
-    @staticmethod
-    async def check_token(token: str) -> bool:
-        url = f"{MrsuAPIService.BASE_URL}/Account/WhoAmI"
         headers = {
-            "Authorization": f"Bearer {token}"
+            "Content-Type": "application/x-www-form-urlencoded"
         }
         try:
             async with httpx.AsyncClient(timeout=10) as client:
-                response = await client.get(url, headers=headers)
-                # 401 – невалидный/протухший токен
-                if response.status_code == 200:
-                    return True
-                elif response.status_code == 401:
-                    return False
-                else:
-                    # Что-то не так с API или с токеном, например 5xx ошибка
-                    response.raise_for_status()
+                token_response = await client.post(
+                    MRSUService.TOKEN_URL, 
+                    data=data,
+                    headers=headers
+                )
+                token_response.raise_for_status()
+                token_json = token_response.json()
+                access_token = token_json.get("access_token")
+                if not access_token:
+                    raise Exception("Missing access_token in MRSU response")
+
+                # 2. Запрос данных пользователя с этим токеном
+                user_headers = {
+                    "Authorization": f"Bearer {access_token}"
+                }
+                user_response = await client.get(
+                    MRSUService.USER_URL, 
+                    headers=user_headers
+                )
+                user_response.raise_for_status()
+                user_data = user_response.json()
+                return user_data
+        except httpx.HTTPStatusError as e:
+            error_message = f"Authentication failed: {e.response.status_code} {e.response.text}"
+            raise Exception(error_message)
         except httpx.RequestError:
             raise Exception("Unable to connect to MRSU API. Please try again later.")
         except Exception as e:
-            raise Exception(f"Unexpected error during token validation: {str(e)}")
+            raise Exception(f"Unexpected error during authentication: {str(e)}")
 
