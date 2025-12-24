@@ -6,6 +6,7 @@ from pydantic import BaseModel
 import logging
 import os
 from google_auth_oauthlib.flow import Flow
+import httpx
 
 from .. import schemas, crud, models
 from ..database import get_db
@@ -121,61 +122,37 @@ async def google_oauth_callback(
 ):
     auth_code = data.get("auth_code") or data.get("code")
     if not auth_code:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Missing auth_code or code"
-        )
+        raise HTTPException(status_code=400, detail="Missing code")
+    
     google_client_id = os.getenv("GOOGLE_CLIENT_ID")
     google_client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
     google_redirect_uri = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:5173/auth/google/callback")
+    
     if not google_client_id or not google_client_secret:
-        logger.error("Google OAuth credentials not configured")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Google OAuth is not configured. Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET environment variables."
+        raise HTTPException(status_code=500, detail="Google creds missing")
+    
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "code": auth_code,
+                "client_id": google_client_id,
+                "client_secret": google_client_secret,
+                "redirect_uri": google_redirect_uri,
+                "grant_type": "authorization_code"
+            }
         )
-    try:
-        flow = Flow.from_client_config(
-            {
-                "web": {
-                    "client_id": google_client_id,
-                    "client_secret": google_client_secret,
-                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                    "token_uri": "https://oauth2.googleapis.com/token",
-                    "redirect_uris": [google_redirect_uri]
-                }
-            },
-            scopes=[
-                "https://www.googleapis.com/auth/calendar",
-                "https://www.googleapis.com/auth/userinfo.email",
-                "https://www.googleapis.com/auth/userinfo.profile"
-            ]
-        )
-        flow.redirect_uri = google_redirect_uri
-        flow.fetch_token(code=auth_code)
-        credentials = flow.credentials
-        refresh_token = credentials.refresh_token
+        if response.status_code != 200:
+            raise HTTPException(status_code=400, detail=f"Token exchange failed: {response.text}")
+        
+        tokens = response.json()
+        refresh_token = tokens.get("refresh_token") or tokens.get("access_token")
         if not refresh_token:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to obtain refresh token from Google"
-            )
+            raise HTTPException(status_code=400, detail="No refresh token")
+        
         current_user.google_refresh_token = refresh_token
         current_user.is_google_verified = True
-        db.add(current_user)
         db.commit()
         db.refresh(current_user)
-        logger.info(f"Google OAuth successfully linked for user {current_user.email}")
-        return {
-            "success": True,
-            "google_verified": True,
-            "message": "Google account successfully linked"
-        }
-    except Exception as e:
-        logger.error(f"Error during Google OAuth callback: {str(e)}", exc_info=True)
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to link Google account: {str(e)}"
-        )
+        return {"success": True, "message": "Linked"}
 

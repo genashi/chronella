@@ -10,13 +10,17 @@ export default function GoogleCallback() {
     useEffect(() => {
         const sendCodeToBackend = async () => {
             if (!code) return;
-
+            const token = localStorage.getItem('access_token');
+            if (!token) {
+                console.error('No auth token, redirect to login');
+                navigate('/login');
+                return;}
             try {
                 const response = await fetch('http://localhost:8000/auth/google/callback', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                        'Authorization': `Bearer ${localStorage.getItem('access_token')}`
                     },
                     body: JSON.stringify({ code })
                 });

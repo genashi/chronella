@@ -179,6 +179,7 @@ const SetupPage: React.FC = () => {
         const data = await response.json();
         
         // 2. Редиректим пользователя в Google
+        console.log(data.url);
         window.location.href = data.url; 
         
     } catch (error) {

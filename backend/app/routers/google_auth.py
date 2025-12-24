@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import JSONResponse
 import os
+from typing import Optional
 
 from google_auth_oauthlib.flow import Flow
 from dotenv import load_dotenv
@@ -74,13 +75,14 @@ async def get_google_auth_url():
 async def google_auth_callback(
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: Optional[User] = Depends(get_current_user)
 ):
     """Принимает код от фронтенда и сохраняет токены"""
     try:
         body = await request.json()
         code = body.get("code")
-        
+        if not current_user:
+            raise HTTPException(401, "Требуется авторизация в приложении перед подключением Google")
         if not code:
             raise HTTPException(status_code=400, detail="Code is required")
 
