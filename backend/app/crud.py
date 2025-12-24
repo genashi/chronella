@@ -29,3 +29,4 @@ def create_user(db: Session, user: schemas.UserCreate):
         # Откатываем транзакцию в случае ошибки
         db.rollback()
         raise
+

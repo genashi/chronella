@@ -1,15 +1,17 @@
 from datetime import datetime, timedelta
 from typing import Union
-from jose import jwt
-from passlib.context import CryptContext
+from jose import jwt, JWTError
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
+from sqlalchemy.orm import Session
 import bcrypt
+
+from .database import get_db
 
 # КОНФИГУРАЦИЯ (потом вынесем в .env)
 SECRET_KEY = "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7"
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30 # Токен живет 30 минут
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 def verify_password(plain_password, hashed_password):
     # bcrypt имеет ограничение в 72 байта для пароля
@@ -35,6 +37,8 @@ def verify_password(plain_password, hashed_password):
         return bcrypt.checkpw(password_bytes, hashed_bytes)
     except Exception:
         # Fallback на passlib для старых хешей, если они есть
+        from passlib.context import CryptContext
+        pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
         return pwd_context.verify(password_bytes, hashed_password)
 
 def get_password_hash(password):
@@ -68,3 +72,43 @@ def create_access_token(data: dict, expires_delta: Union[timedelta, None] = None
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
+
+# OAuth2 схема для получения токена из заголовка Authorization
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
+
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    """
+    Получает текущего пользователя из JWT токена.
+    Используется как зависимость в защищенных эндпоинтах.
+    """
+    # Импортируем crud здесь, чтобы избежать циклического импорта
+    from . import crud
+    
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    
+    try:
+        # Декодируем токен
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+    
+    # Получаем пользователя из базы данных
+    user = crud.get_user_by_email(db, email=email)
+    if user is None:
+        raise credentials_exception
+    
+    return user
+
+def encrypt_password(password: str) -> str:
+    """
+    Шифрует пароль. Алиас для get_password_hash для совместимости.
+    """
+    return get_password_hash(password)
+
