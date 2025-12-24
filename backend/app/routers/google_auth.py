@@ -19,10 +19,8 @@ CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 GOOGLE_DISCOVERY_URL = "https://accounts.google.com/.well-known/openid-configuration"
 SCOPES = [
-    "openid",
-    "https://www.googleapis.com/auth/userinfo.email",
-    "https://www.googleapis.com/auth/userinfo.profile",
-    "https://www.googleapis.com/auth/calendar"  # Важно: доступ к календарю
+    "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/calendar.readonly"
 ]
 REDIRECT_PATH = "/auth/google/callback"
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
@@ -49,18 +47,31 @@ SCOPES = [
 
 @router.get("/url")
 async def get_google_auth_url():
-    """Генерирует ссылку, куда нужно перенаправить пользователя"""
-    try:
-        flow = Flow.from_client_config(
-            CLIENT_CONFIG,
-            scopes=SCOPES,
-            redirect_uri=os.getenv("GOOGLE_REDIRECT_URI")
-        )
-        # access_type='offline' обязателен для получения refresh_token
-        auth_url, _ = flow.authorization_url(access_type='offline', prompt='consent')
-        return {"url": auth_url}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    # Проверяем, что переменные вообще есть
+    client_id = os.getenv("GOOGLE_CLIENT_ID")
+    client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
+    redirect_uri = os.getenv("GOOGLE_REDIRECT_URI")
+
+    if not client_id or not client_secret:
+        raise HTTPException(status_code=500, detail="Google credentials not configured in .env")
+
+    client_config = {
+        "web": {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+        }
+    }
+
+    flow = Flow.from_client_config(
+        client_config,
+        scopes=SCOPES,
+        redirect_uri=redirect_uri # Убедись, что это передается сюда!
+    )
+    
+    auth_url, _ = flow.authorization_url(access_type='offline', prompt='consent')
+    return {"url": auth_url}
 
 @router.post("/callback")
 async def google_auth_callback(
