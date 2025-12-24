@@ -8,9 +8,15 @@ from app import models
 from app.database import engine, Base
 from app.routers import auth, users, google_auth
 
+from dotenv import load_dotenv
+import os
+
 # Создаем все таблицы, которые наследуются от Base, в базе данных
 # Это создает файл database.db, если он еще не существует.
 Base.metadata.create_all(bind=engine)
+
+load_dotenv()
+print(f"DEBUG: Client ID is {os.getenv('GOOGLE_CLIENT_ID')}")
 
 # Создаем экземпляр приложения FastAPI
 app = FastAPI(

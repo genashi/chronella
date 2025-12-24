@@ -26,11 +26,6 @@ REDIRECT_PATH = "/auth/google/callback"
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 REDIRECT_URI = BACKEND_URL + REDIRECT_PATH
 
-router = APIRouter(
-    prefix="/auth/google",  # <-- Обрати внимание на префикс
-    tags=["Google Auth"]
-)
-
 CLIENT_CONFIG = {
     "web": {
         "client_id": os.getenv("GOOGLE_CLIENT_ID"),
@@ -44,6 +39,8 @@ SCOPES = [
     "https://www.googleapis.com/auth/calendar.events",
     "https://www.googleapis.com/auth/calendar.readonly"
 ]
+
+router = APIRouter(prefix="/auth/google", tags=["Google"])
 
 @router.get("/url")
 async def get_google_auth_url():
