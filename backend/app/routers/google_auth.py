@@ -1,21 +1,30 @@
-from fastapi import APIRouter, Depends, Request, HTTPException, status
-from fastapi.responses import RedirectResponse, JSONResponse
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import JSONResponse
 import os
-from urllib.parse import urlencode
 
 from google_auth_oauthlib.flow import Flow
-
 from dotenv import load_dotenv
 
-# Load environment variables
+from sqlalchemy.orm import Session
+
+# Импорт зависимостей вашего проекта для получения БД и текущего пользователя
+from ..database import get_db
+from ..auth_utils import get_current_user
+from ..models import User
+
+# Загрузка переменных окружения
 load_dotenv()
 
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 GOOGLE_DISCOVERY_URL = "https://accounts.google.com/.well-known/openid-configuration"
-SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.profile", "https://www.googleapis.com/auth/userinfo.email"]
+SCOPES = [
+    "openid",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
+    "https://www.googleapis.com/auth/calendar"  # Важно: доступ к календарю
+]
 REDIRECT_PATH = "/auth/google/callback"
-# WARNING: Set your BACKEND_URL in .env (e.g., http://localhost:8000)
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 REDIRECT_URI = BACKEND_URL + REDIRECT_PATH
 
@@ -23,7 +32,7 @@ router = APIRouter()
 
 
 def get_flow():
-    flow = Flow.from_client_config(
+    return Flow.from_client_config(
         {
             "web": {
                 "client_id": CLIENT_ID,
@@ -36,32 +45,38 @@ def get_flow():
             }
         },
         scopes=SCOPES,
-        redirect_uri=REDIRECT_URI
+        redirect_uri=REDIRECT_URI,
     )
-    return flow
 
 
 @router.get("/auth/google/url")
 async def get_google_auth_url():
+    """
+    Возвращает URL для авторизации Google с правами на календарь, offline-доступом и prompt=consent.
+    """
     flow = get_flow()
-    auth_url, state = flow.authorization_url(
+    auth_url, _ = flow.authorization_url(
         access_type="offline",
-        include_granted_scopes="true",
-        prompt="consent"
+        prompt="consent",
+        include_granted_scopes="true"
     )
-    # Optionally save `state` in session/cookie/db if you validate state in callback
     return {"url": auth_url}
 
 
-@router.get("/auth/google/callback")
-async def google_auth_callback(request: Request, code: str = None, state: str = None, db=Depends(lambda: None), current_user=Depends(lambda: None)):
+@router.post("/auth/google/callback")
+async def google_auth_callback(
+    code: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     """
-    code: code from google
-    db: get your DB session depending on your architecture
-    current_user: retrieve the current user by your dependency (via JWT/session etc)
+    Принимает код авторизации от фронта, получает токены, сохраняет refresh_token в модель User.
     """
     if not code:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No code provided")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No code provided"
+        )
 
     flow = get_flow()
     try:
@@ -69,18 +84,19 @@ async def google_auth_callback(request: Request, code: str = None, state: str = 
         credentials = flow.credentials
         refresh_token = credentials.refresh_token
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to fetch token: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to fetch token: {str(e)}"
+        )
 
     if not refresh_token:
-        raise HTTPException(status_code=400, detail="No refresh_token received. Try logging out existing sessions on Google and try again with 'prompt=consent'.")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No refresh_token received. Try logging out of your Google account and repeat auth with 'prompt=consent'."
+        )
 
-    # Save refresh_token for current user
-    # If you have a User model and DB, you should implement this dependency.
-    if not current_user or not db:
-        # Please wire your User DB dependency and current_user authentication mechanism
-        raise HTTPException(status_code=500, detail="User DB or authentication dependency not implemented.")
-
-    setattr(current_user, "google_refresh_token", refresh_token)
+    # Сохраняем refresh_token в профиль пользователя
+    current_user.google_refresh_token = refresh_token
     db.add(current_user)
     db.commit()
     db.refresh(current_user)

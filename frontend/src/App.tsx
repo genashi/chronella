@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import SetupPage from './pages/SetupPage';
 import RegistrationPage from './pages/RegistrationPage';
 import LoginPage from './pages/LoginPage';
+import GoogleCallback from './pages/GoogleCallback';
 import ProtectedRoute from './components/ProtectedRoute';
 
 // Material Design 3 тема
@@ -135,6 +136,7 @@ function App() {
             }
           />
           <Route path="/" element={<Navigate to="/register" replace />} />
+          <Route path="/google-callback" element={<GoogleCallback />} />
         </Routes>
       </BrowserRouter>
     </ThemeProvider>
