@@ -24,9 +24,5 @@ yarn-error.log*
 # база данных
 backend/database.db
 
-#secrets
-backend/.env
 
 
-
-backend/.env

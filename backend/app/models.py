@@ -1,3 +1,5 @@
+# backend/app/models.py
+
 from sqlalchemy import Boolean, Column, Integer, String
 from .database import Base # Импортируем базовый класс, который мы определили
 
@@ -21,21 +23,6 @@ class User(Base):
     
     # student_id - ID студента в системе вуза (понадобится для API p.mrsu.ru)
     student_id = Column(String, index=True, nullable=True) 
-
-    # mrsu_username - имя пользователя в системе МГУ
-    mrsu_username = Column(String, nullable=True)
-
-    # mrsu_password_encrypted - зашифрованный пароль пользователя в системе МГУ
-    mrsu_password_encrypted = Column(String, nullable=True)
-
-    # is_mrsu_verified - подтверждён ли аккаунт МГУ
-    is_mrsu_verified = Column(Boolean, default=False)
-
-    # google_refresh_token - refresh token для Google
-    google_refresh_token = Column(String, nullable=True)
-
-    # is_google_verified - подтверждён ли аккаунт Google
-    is_google_verified = Column(Boolean, default=False)
 
     # Можно добавить метод __repr__ для удобного вывода в консоли
     def __repr__(self):

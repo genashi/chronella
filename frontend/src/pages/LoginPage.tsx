@@ -1,23 +1,18 @@
 import React, { useState } from 'react';
-import {
-  Box,
-  TextField,
-  Button,
-  Typography,
-  Paper,
-  Alert,
-  Link,
-} from '@mui/material';
+import { Box, TextField, Button, Typography, Paper, Alert, Link } from '@mui/material';
 import { Login as LoginIcon } from '@mui/icons-material';
-import { Link as RouterLink, useNavigate } from 'react-router-dom';
+import { Link as RouterLink } from 'react-router-dom';
 
+// Адрес нашего FastAPI бэкенда
 const API_URL = 'http://localhost:8000/auth/login';
 
 const LoginPage: React.FC = () => {
-  const navigate = useNavigate();
+  // Состояния для хранения введенных данных
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  
+  // Состояния для обратной связи
+  const [message, setMessage] = useState<{ text: string, type: 'success' | 'error' } | null>(null);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -26,6 +21,8 @@ const LoginPage: React.FC = () => {
     setMessage(null);
 
     try {
+      // OAuth2PasswordRequestForm ожидает form-urlencoded данные
+      // username - это email в нашем случае
       const formData = new URLSearchParams();
       formData.append('username', email);
       formData.append('password', password);
@@ -38,65 +35,37 @@ const LoginPage: React.FC = () => {
         body: formData.toString(),
       });
 
-      // Проверяем, является ли ответ JSON
-      const contentType = response.headers.get('content-type');
-      let data;
-
-      if (contentType && contentType.includes('application/json')) {
-        try {
-          data = await response.json();
-        } catch (jsonError) {
-          const text = await response.text();
-          throw new Error(`Failed to parse JSON response: ${text}`);
-        }
-      } else {
-        const text = await response.text();
-        throw new Error(`Server returned non-JSON response: ${text}`);
-      }
+      const data = await response.json();
 
       if (response.ok) {
+        // Успешный вход
         if (data.access_token) {
           localStorage.setItem('access_token', data.access_token);
           console.log('Success');
-          setMessage({
-            text: 'Вход выполнен успешно!',
-            type: 'success',
+          setMessage({ 
+            text: 'Вход выполнен успешно!', 
+            type: 'success' 
           });
-          // Перенаправляем на страницу настройки после успешного входа
-          setTimeout(() => {
-            navigate('/setup');
-          }, 1500);
         } else {
-          setMessage({
-            text: 'Токен не получен от сервера.',
-            type: 'error',
+          setMessage({ 
+            text: 'Токен не получен от сервера.', 
+            type: 'error' 
           });
         }
       } else {
-        const errorMessage = data?.detail || data?.message || 'Неверный email или пароль.';
-        setMessage({
-          text: errorMessage,
-          type: 'error',
+        // Ошибка входа
+        setMessage({ 
+          text: data.detail || 'Неверный email или пароль.', 
+          type: 'error' 
         });
       }
     } catch (error) {
-      console.error('Login Error:', error);
-      if (error instanceof TypeError && error.message.includes('fetch')) {
-        setMessage({
-          text: 'Не удалось подключиться к серверу. Убедитесь, что бэкенд запущен на http://localhost:8000',
-          type: 'error',
-        });
-      } else if (error instanceof Error) {
-        setMessage({
-          text: `Ошибка: ${error.message}`,
-          type: 'error',
-        });
-      } else {
-        setMessage({
-          text: 'Произошла неизвестная ошибка. Попробуйте еще раз.',
-          type: 'error',
-        });
-      }
+      // Ошибка сети или другая техническая проблема
+      console.error('Network Error:', error);
+      setMessage({ 
+        text: 'Не удалось подключиться к серверу. Убедитесь, что бэкенд запущен.', 
+        type: 'error' 
+      });
     } finally {
       setLoading(false);
     }
@@ -126,30 +95,32 @@ const LoginPage: React.FC = () => {
           flexDirection: 'column',
         }}
       >
+        {/* Заголовок и иконка - выровнены влево */}
         <Box sx={{ display: 'flex', alignItems: 'center', mb: 4, alignSelf: 'flex-start' }}>
-          <LoginIcon
-            color="primary"
-            sx={{
-              fontSize: 32,
+          <LoginIcon 
+            color="primary" 
+            sx={{ 
+              fontSize: 32, 
               mr: 1.5,
-            }}
+            }} 
           />
-          <Typography
-            component="h1"
-            variant="h4"
-            sx={{
+          <Typography 
+            component="h1" 
+            variant="h4" 
+            sx={{ 
               fontFamily: 'Lora, serif',
             }}
           >
             Вход
           </Typography>
         </Box>
-
+        
+        {/* Поле для вывода сообщений */}
         {message && (
-          <Alert
-            severity={message.type}
-            sx={{
-              width: '100%',
+          <Alert 
+            severity={message.type} 
+            sx={{ 
+              width: '100%', 
               mb: 3,
               borderRadius: 2,
             }}
@@ -158,11 +129,12 @@ const LoginPage: React.FC = () => {
           </Alert>
         )}
 
-        <Box
-          component="form"
-          onSubmit={handleSubmit}
-          noValidate
-          sx={{
+        {/* Форма с полями ввода по центру */}
+        <Box 
+          component="form" 
+          onSubmit={handleSubmit} 
+          noValidate 
+          sx={{ 
             width: '100%',
             display: 'flex',
             flexDirection: 'column',
@@ -211,7 +183,7 @@ const LoginPage: React.FC = () => {
             variant="contained"
             disabled={loading}
             startIcon={<LoginIcon />}
-            sx={{
+            sx={{ 
               mt: 4,
               mb: 2,
               maxWidth: 400,
@@ -231,13 +203,14 @@ const LoginPage: React.FC = () => {
           </Button>
         </Box>
 
+        {/* Ссылка на регистрацию */}
         <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
           <Typography variant="body2" sx={{ color: 'text.secondary' }}>
             Нет аккаунта?{' '}
-            <Link
-              component={RouterLink}
-              to="/register"
-              sx={{
+            <Link 
+              component={RouterLink} 
+              to="/register" 
+              sx={{ 
                 color: 'primary.main',
                 textDecoration: 'none',
                 '&:hover': {

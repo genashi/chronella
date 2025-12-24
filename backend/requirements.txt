@@ -32,10 +32,3 @@ typing-inspect==0.9.0
 typing-inspection==0.4.2
 typing_extensions==4.15.0
 uvicorn==0.38.0
-bcrypt==5.0.0
-passlib==1.7.4
-email-validator==2.3.0
-httpx==0.27.2
-google-auth-oauthlib==1.2.1
-google-auth==2.35.0
-cryptography==43.0.3
