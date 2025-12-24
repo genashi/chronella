@@ -168,7 +168,7 @@ const SetupPage: React.FC = () => {
     try {
         setLoading(true);
         // 1. Спрашиваем у бэкенда ссылку
-        const response = await fetch(`${API_URL}/auth/google/url`, {
+        const response = await fetch('http://localhost:8000/auth/google/url', {
             headers: {
                 'Authorization': `Bearer ${localStorage.getItem('access_token')}`
             }
