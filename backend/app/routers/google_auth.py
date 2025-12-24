@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import JSONResponse
 import os
 
@@ -28,78 +28,75 @@ REDIRECT_PATH = "/auth/google/callback"
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 REDIRECT_URI = BACKEND_URL + REDIRECT_PATH
 
-router = APIRouter()
+router = APIRouter(
+    prefix="/auth/google",  # <-- Обрати внимание на префикс
+    tags=["Google Auth"]
+)
 
+CLIENT_CONFIG = {
+    "web": {
+        "client_id": os.getenv("GOOGLE_CLIENT_ID"),
+        "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),
+        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+        "token_uri": "https://oauth2.googleapis.com/token",
+    }
+}
 
-def get_flow():
-    return Flow.from_client_config(
-        {
-            "web": {
-                "client_id": CLIENT_ID,
-                "project_id": "dummy",
-                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                "token_uri": "https://oauth2.googleapis.com/token",
-                "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-                "client_secret": CLIENT_SECRET,
-                "redirect_uris": [REDIRECT_URI],
-            }
-        },
-        scopes=SCOPES,
-        redirect_uri=REDIRECT_URI,
-    )
+SCOPES = [
+    "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/calendar.readonly"
+]
 
-
-@router.get("/auth/google/url")
+@router.get("/url")
 async def get_google_auth_url():
-    """
-    Возвращает URL для авторизации Google с правами на календарь, offline-доступом и prompt=consent.
-    """
-    flow = get_flow()
-    auth_url, _ = flow.authorization_url(
-        access_type="offline",
-        prompt="consent",
-        include_granted_scopes="true"
-    )
-    return {"url": auth_url}
+    """Генерирует ссылку, куда нужно перенаправить пользователя"""
+    try:
+        flow = Flow.from_client_config(
+            CLIENT_CONFIG,
+            scopes=SCOPES,
+            redirect_uri=os.getenv("GOOGLE_REDIRECT_URI")
+        )
+        # access_type='offline' обязателен для получения refresh_token
+        auth_url, _ = flow.authorization_url(access_type='offline', prompt='consent')
+        return {"url": auth_url}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-
-@router.post("/auth/google/callback")
+@router.post("/callback")
 async def google_auth_callback(
-    code: str,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """
-    Принимает код авторизации от фронта, получает токены, сохраняет refresh_token в модель User.
-    """
-    if not code:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No code provided"
-        )
-
-    flow = get_flow()
+    """Принимает код от фронтенда и сохраняет токены"""
     try:
+        body = await request.json()
+        code = body.get("code")
+        
+        if not code:
+            raise HTTPException(status_code=400, detail="Code is required")
+
+        flow = Flow.from_client_config(
+            CLIENT_CONFIG,
+            scopes=SCOPES,
+            redirect_uri=os.getenv("GOOGLE_REDIRECT_URI")
+        )
+        
+        # Обмениваем код на токены
         flow.fetch_token(code=code)
         credentials = flow.credentials
-        refresh_token = credentials.refresh_token
+
+        # Сохраняем refresh_token в базу
+        # Если refresh_token нет (пользователь уже давал доступ), сохраняем access_token
+        current_user.google_refresh_token = credentials.refresh_token or credentials.token
+        current_user.is_google_verified = True
+        
+        db.commit()
+        db.refresh(current_user)
+        
+        return {"status": "success", "message": "Google Calendar подключен!"}
+        
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to fetch token: {str(e)}"
-        )
-
-    if not refresh_token:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No refresh_token received. Try logging out of your Google account and repeat auth with 'prompt=consent'."
-        )
-
-    # Сохраняем refresh_token в профиль пользователя
-    current_user.google_refresh_token = refresh_token
-    db.add(current_user)
-    db.commit()
-    db.refresh(current_user)
-
-    return JSONResponse({"detail": "Google refresh_token saved successfully"})
+        print(f"Error in google callback: {e}")
+        raise HTTPException(status_code=400, detail="Ошибка авторизации Google")
 

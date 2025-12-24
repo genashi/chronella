@@ -164,21 +164,30 @@ const SetupPage: React.FC = () => {
   };
 
   // ---- Шаг 2. Привязка Google через переадресацию — только кнопка!
-  const handleGoogleRedirect = () => {
-    window.location.href = `${API_URL}/auth/google/login`;
-  };
-
-  // --- После Google OAuth если фронт был редиректнут, повторно refetch
-  useEffect(() => {
-    const hash = window.location.hash || window.location.search;
-    if (
-      (hash && hash.includes('google_oauth')) ||
-      window.location.pathname.endsWith('/setup')
-    ) {
-      fetchProfileStatus();
+  const handleGoogleLink = async () => {
+    try {
+        setLoading(true);
+        // 1. Спрашиваем у бэкенда ссылку
+        const response = await fetch(`${API_URL}/auth/google/url`, {
+            headers: {
+                'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+            }
+        });
+        
+        if (!response.ok) throw new Error('Failed to get Google URL');
+        
+        const data = await response.json();
+        
+        // 2. Редиректим пользователя в Google
+        window.location.href = data.url; 
+        
+    } catch (error) {
+        console.error("Google link error:", error);
+        alert("Ошибка при получении ссылки Google");
+    } finally {
+        setLoading(false);
     }
-    // eslint-disable-next-line
-  }, []);
+};
 
   // Шаг 3. Готово
   const handleGoToDashboard = () => {
@@ -362,7 +371,7 @@ const SetupPage: React.FC = () => {
                 fullWidth
                 variant="outlined"
                 startIcon={<GoogleIcon />}
-                onClick={handleGoogleRedirect}
+                onClick={handleGoogleLink}
                 disabled={profileStatus.google_linked}
                 sx={{
                   borderRadius: 2,

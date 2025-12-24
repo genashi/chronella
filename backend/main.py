@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware # Для связи React и 
 # !!! НОВЫЕ ИМПОРТЫ !!!
 from app import models
 from app.database import engine, Base
-from app.routers import auth, users
+from app.routers import auth, users, google_auth
 
 # Создаем все таблицы, которые наследуются от Base, в базе данных
 # Это создает файл database.db, если он еще не существует.
@@ -45,6 +45,7 @@ def read_root():
 # Подключаем роутеры
 app.include_router(auth.router)
 app.include_router(users.router)
+app.include_router(google_auth.router)
 
 # Документация: FastAPI автоматически создает интерактивную документацию
 # Ее можно будет посмотреть по адресу: http://127.0.0.1:8000/docs
