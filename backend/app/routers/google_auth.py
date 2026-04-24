@@ -1,74 +1,48 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy.orm import Session
+from google_auth_oauthlib.flow import Flow
 import os
 
-from google_auth_oauthlib.flow import Flow
-from dotenv import load_dotenv
-
-from sqlalchemy.orm import Session
-
-# Импорт зависимостей вашего проекта для получения БД и текущего пользователя
 from ..database import get_db
 from ..auth_utils import get_current_user
 from ..models import User
 
-# Загрузка переменных окружения
-load_dotenv()
-
-CLIENT_ID = os.getenv("CLIENT_ID")
-CLIENT_SECRET = os.getenv("CLIENT_SECRET")
-GOOGLE_DISCOVERY_URL = "https://accounts.google.com/.well-known/openid-configuration"
-SCOPES = [
-    "https://www.googleapis.com/auth/calendar.events",
-    "https://www.googleapis.com/auth/calendar.readonly"
-]
-REDIRECT_PATH = "/auth/google/callback"
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
-REDIRECT_URI = BACKEND_URL + REDIRECT_PATH
-
-CLIENT_CONFIG = {
-    "web": {
-        "client_id": os.getenv("GOOGLE_CLIENT_ID"),
-        "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),
-        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-        "token_uri": "https://oauth2.googleapis.com/token",
-    }
-}
-
-SCOPES = [
-    "https://www.googleapis.com/auth/calendar.events",
-    "https://www.googleapis.com/auth/calendar.readonly"
-]
-
 router = APIRouter(prefix="/auth/google", tags=["Google"])
 
-@router.get("/url")
-async def get_google_auth_url():
-    # Проверяем, что переменные вообще есть
+SCOPES = [
+    "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/calendar.readonly"
+]
+
+def get_flow():
+    """Создаём Flow каждый раз заново — env точно загружен к этому моменту."""
     client_id = os.getenv("GOOGLE_CLIENT_ID")
     client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
     redirect_uri = os.getenv("GOOGLE_REDIRECT_URI")
 
-    if not client_id or not client_secret:
-        raise HTTPException(status_code=500, detail="Google credentials not configured in .env")
+    if not client_id or not client_secret or not redirect_uri:
+        raise HTTPException(status_code=500, detail="Google credentials not configured")
 
-    client_config = {
-        "web": {
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": "https://oauth2.googleapis.com/token",
-        }
-    }
-
-    flow = Flow.from_client_config(
-        client_config,
+    return Flow.from_client_config(
+        {
+            "web": {
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+            }
+        },
         scopes=SCOPES,
-        redirect_uri=redirect_uri # Убедись, что это передается сюда!
+        redirect_uri=redirect_uri
     )
-    
-    auth_url, _ = flow.authorization_url(access_type='offline', prompt='consent')
+
+
+@router.get("/url")
+async def get_google_auth_url():
+    flow = get_flow()
+    auth_url, _ = flow.authorization_url(access_type="offline", prompt="consent")
     return {"url": auth_url}
+
 
 @router.post("/callback")
 async def google_auth_callback(
@@ -76,35 +50,25 @@ async def google_auth_callback(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Принимает код от фронтенда и сохраняет токены"""
-    try:
-        body = await request.json()
-        code = body.get("code")
-        
-        if not code:
-            raise HTTPException(status_code=400, detail="Code is required")
+    body = await request.json()
+    code = body.get("code")
+    if not code:
+        raise HTTPException(status_code=400, detail="Code is required")
 
-        flow = Flow.from_client_config(
-            CLIENT_CONFIG,
-            scopes=SCOPES,
-            redirect_uri=os.getenv("GOOGLE_REDIRECT_URI")
+    flow = get_flow()  # ← используем get_flow() вместо CLIENT_CONFIG
+    flow.fetch_token(code=code)
+    credentials = flow.credentials
+
+    refresh_token = credentials.refresh_token
+    if not refresh_token:
+        raise HTTPException(
+            status_code=400,
+            detail="Refresh token not received. Revoke app access in Google account and try again."
         )
-        
-        # Обмениваем код на токены
-        flow.fetch_token(code=code)
-        credentials = flow.credentials
 
-        # Сохраняем refresh_token в базу
-        # Если refresh_token нет (пользователь уже давал доступ), сохраняем access_token
-        current_user.google_refresh_token = credentials.refresh_token or credentials.token
-        current_user.is_google_verified = True
-        
-        db.commit()
-        db.refresh(current_user)
-        
-        return {"status": "success", "message": "Google Calendar подключен!"}
-        
-    except Exception as e:
-        print(f"Error in google callback: {e}")
-        raise HTTPException(status_code=400, detail="Ошибка авторизации Google")
+    current_user.google_refresh_token = refresh_token
+    current_user.is_google_verified = True
+    db.commit()
+    db.refresh(current_user)
 
+    return {"status": "success", "message": "Google Calendar connected"}

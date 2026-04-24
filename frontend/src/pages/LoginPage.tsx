@@ -57,6 +57,7 @@ const LoginPage: React.FC = () => {
       if (response.ok) {
         if (data.access_token) {
           localStorage.setItem('access_token', data.access_token);
+          console.log('Token saved:', localStorage.getItem('access_token'));
           console.log('Success');
           setMessage({
             text: 'Вход выполнен успешно!',

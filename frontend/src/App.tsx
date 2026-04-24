@@ -1,4 +1,5 @@
 import { ThemeProvider, createTheme } from '@mui/material/styles';
+import DashboardPage from './pages/DashboardPage';
 import CssBaseline from '@mui/material/CssBaseline';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import SetupPage from './pages/SetupPage';
@@ -6,6 +7,8 @@ import RegistrationPage from './pages/RegistrationPage';
 import LoginPage from './pages/LoginPage';
 import GoogleCallback from './pages/GoogleCallback';
 import ProtectedRoute from './components/ProtectedRoute';
+import SchedulePage from './pages/SchedulePage';
+import GradesPage from './pages/GradesPage';
 
 // Material Design 3 тема
 const theme = createTheme({
@@ -125,6 +128,8 @@ function App() {
       <CssBaseline />
       <BrowserRouter>
         <Routes>
+          <Route path="/schedule" element={<ProtectedRoute><SchedulePage /></ProtectedRoute>} />
+          <Route path="/grades" element={<ProtectedRoute><GradesPage /></ProtectedRoute>} />
           <Route path="/register" element={<RegistrationPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route
@@ -135,8 +140,10 @@ function App() {
               </ProtectedRoute>
             }
           />
+          
           <Route path="/" element={<Navigate to="/register" replace />} />
           <Route path="/google-callback" element={<GoogleCallback />} />
+          <Route path="/dashboard" element={<Navigate to="/schedule" replace />} />
         </Routes>
       </BrowserRouter>
     </ThemeProvider>
@@ -144,3 +151,5 @@ function App() {
 }
 
 export default App
+
+

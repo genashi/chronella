@@ -17,3 +17,9 @@ python(FastAPI, Uvicorn (сервер для запуска FastAPI), Pydantic (
    
 запуск сервера  `uvicorn main:app --reload --port 8000`    
    
+команды для быстого запуска в консоли из папки chronella
+```
+cd backend
+.\venv\Scripts\Activate
+uvicorn main:app --reload --port 8000
+```
