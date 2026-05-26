@@ -1,46 +1,69 @@
-# backend/app/services/analytics.py
-from datetime import datetime
-from ..models import Discipline, Event
+import statistics
+from datetime import datetime, timedelta
 
-def calculate_performance_metrics(discipline: Discipline, user_events: list[Event]):
-    points = discipline.control_points
-    if not points:
-        return None
-
-    # 1. Метрика успешности (S) = (Набранные баллы / Макс. возможные за прошедшие точки)
-    total_current_score = sum(p.score for p in points if p.score is not None)
-    # Считаем макс. балл только для тех точек, которые уже должны были пройти (дедлайн в прошлом) 
-    # или по которым уже выставлена оценка
-    past_max_score = sum(
-        p.max_score for p in points 
-        if (p.deadline and p.deadline < datetime.utcnow()) or (p.score is not None)
-    )
+def analyze_weekly_workload(events, week_start_str: str):
+    # Коэффициенты трудоемкости (Формула 16)
+    weights = {'lecture': 1.0, 'practice': 1.2, 'lab': 1.2, 'deadline': 2.0, 'exam': 2.5, 'control': 2.5, 'custom': 1.0}
     
-    success_rate = (total_current_score / past_max_score) if past_max_score > 0 else 1.0
-
-    # 2. Прогноз итогового балла (P_prog)
-    total_possible_max = sum(p.max_score for p in points if p.max_score)
-    projected_score = success_rate * total_possible_max
-
-    # 3. Индекс активности (I_act) - на основе посещаемости занятий по этой дисциплине
-    # Ищем события, в названии которых есть имя дисциплины
-    rel_events = [e for e in user_events if discipline.name.lower() in e.title.lower()]
-    visited = [e for e in rel_events if e.is_visited is True]
+    start_dt = datetime.strptime(week_start_str, "%Y-%m-%d")
+    # Инициализация всех 7 дней для корректного расчета среднего и CV
+    daily_loads = {(start_dt + timedelta(days=i)).strftime('%Y-%m-%d'): 0.0 for i in range(7)}
     
-    attendance_rate = len(visited) / len(rel_events) if rel_events else 1.0
+    for event in events:
+        e_type = event.type if hasattr(event, 'type') else event.get('type', 'custom')
+        e_start = event.start_at if hasattr(event, 'start_at') else event.get('start_at')
+        e_end = event.end_at if hasattr(event, 'end_at') else event.get('end_at')
+        
+        if not e_start or not e_end:
+            continue
+            
+        day = e_start.strftime('%Y-%m-%d')
+        if day in daily_loads:
+            duration = (e_end - e_start).total_seconds() / 3600
+            weight = weights.get(e_type, 1.0)
+            daily_loads[day] += duration * weight
+
+    loads_only = list(daily_loads.values())
     
-    # Итоговый статус (риск)
-    status = "normal"
-    if success_rate < 0.6 or attendance_rate < 0.5:
-        status = "risk"
-    if success_rate < 0.4:
-        status = "danger"
+    # Статистические метрики
+    mean_load = statistics.mean(loads_only)
+    stdev_load = statistics.stdev(loads_only) if len(loads_only) > 1 else 0
+    cv = (stdev_load / mean_load * 100) if mean_load > 0 else 0
+    
+    good, improve = [], []
+    daily_details = []
+
+    # Анализ порогов CV (Адаптировано для N=7)
+    if cv <= 60:
+        good.append(f"Нагрузка распределена отлично (CV = {cv:.1f}% ≤ 60%).")
+    elif cv <= 90:
+        improve.append(f"Умеренная неравномерность (CV = {cv:.1f}%). Можно сгладить пики.")
+    else:
+        improve.append(f"Сильная неравномерность (CV = {cv:.1f}% > 90%). График слишком скачкообразный.")
+
+    # Z-анализ для каждого дня (Адаптировано для N=7)
+    for day, load in daily_loads.items():
+        z_score = (load - mean_load) / stdev_load if stdev_load > 0 else 0
+        
+        daily_details.append({
+            "day": day,
+            "load": round(load, 2),
+            "z_score": round(z_score, 2)
+        })
+        
+        if z_score >= 1.5:
+            improve.append(f"Критический перегруз {day} (Z ≥ +1.5).")
+        elif z_score >= 1.0:
+            improve.append(f"Повышенная нагрузка {day} (Z ≥ +1.0).")
+    
+    if not improve:
+        good.append("Критических перекосов в расписании нет.")
 
     return {
-        "success_rate": round(success_rate, 2),
-        "current_score": total_current_score,
-        "projected_score": round(projected_score, 1),
-        "attendance_rate": round(attendance_rate, 2),
-        "status": status,
-        "total_max": total_possible_max
+        "mean_load": round(mean_load, 2),
+        "stdev_load": round(stdev_load, 2),
+        "cv": round(cv, 2),
+        "daily_details": daily_details,
+        "good": good,
+        "improve": improve
     }

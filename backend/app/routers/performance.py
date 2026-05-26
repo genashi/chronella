@@ -1,26 +1,33 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from datetime import datetime
+from pydantic import BaseModel
+from typing import Optional
 import httpx
 
 from ..database import get_db
 from ..auth_utils import get_current_user
-from ..models import User, Discipline
+from ..models import User, Discipline, ControlPoint, Event
 from .schedule import get_fresh_mrsu_token
+from datetime import timedelta
 
 router = APIRouter(prefix="/performance", tags=["Performance"])
+
+class ControlPointUpdate(BaseModel):
+    type: Optional[str] = None
+    deadline: Optional[str] = None
+    is_late: Optional[bool] = None
 
 @router.get("/disciplines")
 async def get_disciplines(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # 1. Сначала смотрим в нашей базе
     disciplines = db.query(Discipline).filter(Discipline.user_id == current_user.id).all()
     
     if not disciplines:
         token = await get_fresh_mrsu_token(current_user, db)
         async with httpx.AsyncClient(verify=False, timeout=20.0) as client:
-            # Используем новый эндпоинт из документации
             url = "https://papi.mrsu.ru/v1/StudentSemester?selector=current"
             resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
             
@@ -28,31 +35,26 @@ async def get_disciplines(
                 data = resp.json()
                 record_books = data.get("RecordBooks", [])
                 
-                new_items = []
                 for book in record_books:
                     for d in book.get("Disciplines", []):
-                        # Проверяем на Relevance (как просили в доках) и дубликаты
                         if d.get("Relevance") is not False:
                             mrsu_id = str(d.get("Id"))
                             
-                            # Проверяем, нет ли уже такого в БД
                             exists = db.query(Discipline).filter_by(
                                 user_id=current_user.id, 
-                                mrsu_id=mrsu_id
+                                mrsu_id=int(mrsu_id)
                             ).first()
                             
                             if not exists:
                                 new_discipline = Discipline(
                                     user_id=current_user.id,
-                                    mrsu_id=mrsu_id,
+                                    mrsu_id=int(mrsu_id),
                                     name=d.get("Title", "Без названия"),
                                     semester=str(d.get("PeriodInt", "1"))
                                 )
                                 db.add(new_discipline)
-                                new_items.append(new_discipline)
                 
                 db.commit()
-                # Возвращаем обновленный список из базы
                 disciplines = db.query(Discipline).filter(Discipline.user_id == current_user.id).all()
             else:
                 raise HTTPException(
@@ -70,10 +72,121 @@ async def get_discipline_plan(
 ):
     token = await get_fresh_mrsu_token(current_user, db)
     async with httpx.AsyncClient(verify=False, timeout=15.0) as client:
-        # Используем ID из МГУ для запроса плана
         url = f"https://papi.mrsu.ru/v1/StudentRatingPlan/{mrsu_id}"
         resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
         
         if resp.status_code == 200:
-            return resp.json()  # Возвращаем объект с Sections и ControlDots
+            plan_data = resp.json()
+            
+            try:
+                discipline = db.query(Discipline).filter(
+                    Discipline.user_id == current_user.id,
+                    Discipline.mrsu_id == int(mrsu_id)
+                ).first()
+
+                if discipline:
+                    existing_cps = db.query(ControlPoint).filter_by(discipline_id=discipline.id).all()
+                    
+                    # --- НАКОПИТЕЛЬНЫЙ СЧЕТЧИК БАЛЛОВ ---
+                    cumulative_sum = 0.0
+
+                    for section in plan_data.get("Sections", []):
+                        for dot in section.get("ControlDots", []):
+                            title = dot.get("Title", "Без названия")
+                            dot_id = dot.get("Id")
+                            
+                            cp = next((c for c in existing_cps if isinstance(c.eios_raw, dict) and c.eios_raw.get("Id") == dot_id), None)
+
+                            score = dot.get("Mark", {}).get("Ball") if dot.get("Mark") else None
+                            max_score = dot.get("MaxBall") or 0.0
+
+                            if not cp:
+                                # Логика отсечения: всё, что идет ПОСЛЕ накопленных 70 баллов — это экзамен.
+                                # Округляем до 1 знака, чтобы избежать багов с плавающей точкой (например, 69.9999)
+                                if round(cumulative_sum, 1) >= 70.0:
+                                    default_type = "exam"
+                                else:
+                                    default_type = "lab"
+                                    
+                                cp = ControlPoint(
+                                    discipline_id=discipline.id,
+                                    title=title,
+                                    type=default_type,
+                                    deadline=None,
+                                    score=score,
+                                    max_score=max_score,
+                                    is_late=True,
+                                    eios_raw=dot
+                                )
+                                db.add(cp)
+                                existing_cps.append(cp)
+                            else:
+                                cp.score = score
+                                cp.max_score = max_score
+                                cp.eios_raw = dot
+                            
+                            # Прибавляем баллы ТЕКУЩЕЙ точки к сумме для проверки СЛЕДУЮЩИХ точек
+                            cumulative_sum += max_score
+                            
+                            db.commit()
+                            db.refresh(cp)
+
+                            dot["db_id"] = cp.id
+                            dot["custom_type"] = cp.type
+                            dot["custom_deadline"] = cp.deadline.strftime("%Y-%m-%d") if cp.deadline else ""
+                            dot["custom_is_late"] = cp.is_late
+            except Exception as e:
+                print(f"Ошибка сохранения контрольных точек в БД: {e}")
+
+            return plan_data
+            
         raise HTTPException(status_code=resp.status_code, detail="Не удалось загрузить план")
+
+@router.patch("/control-points/{cp_id}")
+async def update_control_point(
+    cp_id: int,
+    data: ControlPointUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    cp = db.query(ControlPoint).join(Discipline).filter(
+        ControlPoint.id == cp_id,
+        Discipline.user_id == current_user.id
+    ).first()
+
+    if not cp:
+        raise HTTPException(status_code=404, detail="Контрольная точка не найдена")
+
+    if data.type is not None:
+        cp.type = data.type
+        
+    if data.deadline is not None:
+        event_title = f"Дедлайн: {cp.title}"
+        if data.deadline == "":
+            cp.deadline = None
+            db.query(Event).filter(Event.user_id == current_user.id, Event.title == event_title).delete()
+        else:
+            cp.deadline = datetime.strptime(data.deadline, "%Y-%m-%d")
+            eff_start = datetime.combine(cp.deadline.date(), datetime.min.time())
+            eff_end = eff_start + timedelta(minutes=30)
+            
+            existing_event = db.query(Event).filter_by(user_id=current_user.id, title=event_title).first()
+            if existing_event:
+                existing_event.start_at = eff_start
+                existing_event.end_at = eff_end
+            else:
+                new_event = Event(
+                    user_id=current_user.id,
+                    title=event_title,
+                    type="deadline",
+                    start_at=eff_start,
+                    end_at=eff_end,
+                    is_modified=True
+                )
+                db.add(new_event)
+                
+    if data.is_late is not None:
+        cp.is_late = data.is_late
+
+    db.commit()
+    return {"status": "ok"}

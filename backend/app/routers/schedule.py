@@ -3,12 +3,14 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 import httpx
 
+from ..services.google_calendar import get_google_service, ensure_chronella_calendar, upsert_event
 from ..database import get_db
 from ..auth_utils import get_current_user
 from ..models import User, Event
 from ..schemas import EventOut, EventVisitUpdate, EventCreate
 from ..core.security import decrypt_password
 from ..services.mrsu_auth import mrsu_service#, upsert_event, get_google_service, ensure_chronella_calendar,
+from app.services.analytics import analyze_weekly_workload
 
 router = APIRouter(prefix="/schedule", tags=["Schedule"])
 
@@ -24,7 +26,7 @@ LESSON_TIMES = {
 }
 
 LESSON_TYPE_MAP = {
-    0: "lecture",   # Default
+    0: None,
     1: "practice",
     2: "lab",
 }
@@ -122,7 +124,7 @@ async def sync_single_date(date_str: str, user: User, db: Session, token: str) -
             event_data = dict(
                 user_id=user.id,
                 title=(discipline.get("Title") or "Занятие").strip(),
-                type=LESSON_TYPE_MAP.get(discipline.get("LessonType", -1), "unknown"),
+                type=LESSON_TYPE_MAP.get(discipline.get("LessonType"), None),
                 start_at=start_at,
                 end_at=end_at,
                 location=location,
@@ -142,10 +144,34 @@ async def sync_single_date(date_str: str, user: User, db: Session, token: str) -
     db.commit()
     return synced
 
-@router.patch("/{event_id}", response_model=EventOut)
+@router.get("/analytics/week")
+def get_week_analytics(
+    date: str = Query(..., description="Дата, формат YYYY-MM-DD"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # Вычисляем начало и конец недели так же, как в get_week_schedule
+    day = datetime.strptime(date, "%Y-%m-%d")
+    week_start = day - timedelta(days=day.weekday())
+    week_end = week_start + timedelta(days=7)
+
+    # Запрашиваем события напрямую
+    events = db.query(Event).filter(
+        Event.user_id == current_user.id,
+        Event.start_at >= week_start,
+        Event.start_at < week_end
+    ).all()
+    
+    analysis = analyze_weekly_workload(events)
+    return analysis
+
+@router.patch("/{event_id}", response_model=list[EventOut])
 def update_event(
     event_id: int,
     data: dict,
+    bulk: bool = Query(False),
+    date_from: str = Query(None),
+    date_to: str = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -157,16 +183,44 @@ def update_event(
         raise HTTPException(status_code=404, detail="Event not found")
 
     allowed = {"title", "type", "start_at", "end_at", "location", "teacher", "description"}
-    for k, v in data.items():
-        if k in allowed:
-            if k in ("start_at", "end_at") and isinstance(v, str):
-                v = datetime.fromisoformat(v)
-            setattr(event, k, v)
 
-    event.is_modified = True
+    if bulk and event.eios_raw:
+        # Находим все похожие события: та же дисциплина + тот же номер пары + тот же день недели
+        disc_id = event.eios_raw.get("Id")
+        lesson_number = LESSON_TIMES.get(  # номер пары по времени начала
+            next((k for k, v in LESSON_TIMES.items()
+                  if datetime.strptime(v[0], "%H:%M").time() == event.start_at.time()), None)
+        )
+        weekday = event.start_at.weekday()
+
+        query = db.query(Event).filter(
+            Event.user_id == current_user.id,
+            Event.eios_raw.isnot(None),
+        )
+        if date_from:
+            query = query.filter(Event.start_at >= datetime.strptime(date_from, "%Y-%m-%d"))
+        if date_to:
+            query = query.filter(Event.start_at <= datetime.strptime(date_to, "%Y-%m-%d"))
+
+        target_events = [
+            e for e in query.all()
+            if e.eios_raw.get("Id") == disc_id
+            and e.start_at.weekday() == weekday
+            and e.start_at.time() == event.start_at.time()
+        ]
+    else:
+        target_events = [event]
+
+    for e in target_events:
+        for k, v in data.items():
+            if k in allowed:
+                if k in ("start_at", "end_at") and isinstance(v, str):
+                    v = datetime.fromisoformat(v)
+                setattr(e, k, v)
+        e.is_modified = True
+
     db.commit()
-    db.refresh(event)
-    return event
+    return target_events
 
 @router.post("/sync/week")
 async def sync_week(
@@ -190,6 +244,29 @@ async def sync_week(
 
     return {"synced": total, "week_start": week_start.strftime("%Y-%m-%d")}
 
+@router.post("/sync/range")
+async def sync_range(
+    date_from: str = Query(...),
+    date_to: str = Query(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if not current_user.is_mrsu_verified:
+        raise HTTPException(status_code=400, detail="MRSU account not linked")
+
+    token = await get_fresh_mrsu_token(current_user, db)
+
+    start = datetime.strptime(date_from, "%Y-%m-%d")
+    end = datetime.strptime(date_to, "%Y-%m-%d")
+
+    total = 0
+    current = start
+    while current <= end:
+        day_str = current.strftime("%Y-%m-%d")
+        total += await sync_single_date(day_str, current_user, db, token)
+        current += timedelta(days=1)
+
+    return {"synced": total}
 
 @router.get("/week", response_model=list[EventOut])
 def get_week_schedule(
@@ -289,28 +366,29 @@ def delete_event(
     db.commit()
     return {"ok": True}
 
-@router.post("/export/week")
-async def export_week_to_google(
-    date: str = Query(...),
+@router.post("/export")
+async def export_to_google(
+    date_from: str = Query(...),
+    date_to: str = Query(...),
+    types: str = Query(...),  # "lecture,practice,exam"
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if not current_user.is_google_verified or not current_user.google_refresh_token:
-        raise HTTPException(status_code=400, detail="Google account not linked")
+    if not current_user.is_google_verified:
+        raise HTTPException(status_code=400, detail="Google not linked")
 
-    day = datetime.strptime(date, "%Y-%m-%d")
-    week_start = day - timedelta(days=day.weekday())
-    week_end = week_start + timedelta(days=7)
+    type_list = types.split(',')
+    start = datetime.strptime(date_from, "%Y-%m-%d")
+    end = datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1)
 
     events = db.query(Event).filter(
         Event.user_id == current_user.id,
-        Event.start_at >= week_start,
-        Event.start_at < week_end
+        Event.start_at >= start,
+        Event.start_at < end,
+        Event.type.in_(type_list)
     ).all()
 
     service = get_google_service(current_user.google_refresh_token)
-
-    # Получаем или создаём календарь Chronella
     calendar_id = current_user.google_calendar_id
     if not calendar_id:
         calendar_id = ensure_chronella_calendar(service)
@@ -324,7 +402,7 @@ async def export_week_to_google(
             event.google_event_id = gid
             exported += 1
         except Exception as e:
-            print(f"Export error for event {event.id}: {e}")
+            print(f"Export error {event.id}: {e}")
 
     db.commit()
-    return {"exported": exported, "calendar_id": calendar_id}
+    return {"exported": exported}

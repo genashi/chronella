@@ -4,7 +4,6 @@ from .database import Base
 import enum
 
 class EventType(str, enum.Enum):
-    unknown = "unknown"  # ← добавь первым
     lecture = "lecture"
     practice = "practice"
     lab = "lab"
@@ -50,7 +49,7 @@ class Event(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
 
     title = Column(String, nullable=False)
-    type = Column(String, default=EventType.lecture)  # lecture/practice/lab/custom
+    type = Column(String, nullable=True, default=None) # lecture/practice/lab/custom
     start_at = Column(DateTime, nullable=False)
     end_at = Column(DateTime, nullable=False)
     location = Column(String, nullable=True)   # аудитория

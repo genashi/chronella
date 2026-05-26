@@ -28,7 +28,7 @@ class TokenData(BaseModel):
 class EventOut(BaseModel):
     id: int
     title: str
-    type: str
+    type: str | None
     start_at: datetime
     end_at: datetime
     location: Optional[str] = None
