@@ -2,6 +2,14 @@
 Скрипт миграции базы данных для добавления недостающих колонок.
 Запустите этот скрипт один раз для обновления структуры базы данных.
 """
+
+from app.database import engine, Base
+from app import models
+
+Base.metadata.drop_all(bind=engine)
+Base.metadata.create_all(bind=engine)
+print("DB recreated")
+
 import sqlite3
 import os
 

@@ -43,8 +43,13 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
         )
 @router.get("/profile")
 async def get_profile(current_user: models.User = Depends(get_current_user)):
-
-    return {"id": current_user.id, "email": current_user.email}
+    return {
+        "id": current_user.id,
+        "email": current_user.email,
+        "is_mrsu_verified": current_user.is_mrsu_verified,
+        "mrsu_linked": current_user.is_mrsu_verified,
+        "google_linked": current_user.is_google_verified,
+    }
 
 @router.post("/login", response_model=schemas.Token)
 def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
@@ -61,12 +66,14 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
-@router.post("/auth/link-mrsu", response_model=schemas.UserOut)
+@router.post("/link-mrsu", response_model=schemas.UserOut)
 async def link_mrsu_account_new(
     data: dict,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
+    print(f"Current user: {current_user}")  # ← добавь
+    print(f"User email: {current_user.email}")
     """
     Привязка аккаунта MRSU по username и password (POST /users/link-mrsu).
     Проверяет валидность пароля через mrsu_service.authenticate,
@@ -104,78 +111,14 @@ async def link_mrsu_account_new(
         db.add(current_user)
         db.commit()
         db.refresh(current_user)
+        print(f"Saved OK, returning user")
         return current_user
     except Exception as e:
         db.rollback()
+        print(f"DB save error: {e}")
         logger.error(f"Failed to save MRSU account: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to link MRSU account: {str(e)}"
-        )
-
-@router.post("/google/callback")
-async def google_oauth_callback(
-    data: dict,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user)
-):
-    auth_code = data.get("auth_code") or data.get("code")
-    if not auth_code:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Missing auth_code or code"
-        )
-    google_client_id = os.getenv("GOOGLE_CLIENT_ID")
-    google_client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
-    google_redirect_uri = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:5173/auth/google/callback")
-    if not google_client_id or not google_client_secret:
-        logger.error("Google OAuth credentials not configured")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Google OAuth is not configured. Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET environment variables."
-        )
-    try:
-        flow = Flow.from_client_config(
-            {
-                "web": {
-                    "client_id": google_client_id,
-                    "client_secret": google_client_secret,
-                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                    "token_uri": "https://oauth2.googleapis.com/token",
-                    "redirect_uris": [google_redirect_uri]
-                }
-            },
-            scopes=[
-                "https://www.googleapis.com/auth/calendar",
-                "https://www.googleapis.com/auth/userinfo.email",
-                "https://www.googleapis.com/auth/userinfo.profile"
-            ]
-        )
-        flow.redirect_uri = google_redirect_uri
-        flow.fetch_token(code=auth_code)
-        credentials = flow.credentials
-        refresh_token = credentials.refresh_token
-        if not refresh_token:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to obtain refresh token from Google"
-            )
-        current_user.google_refresh_token = refresh_token
-        current_user.is_google_verified = True
-        db.add(current_user)
-        db.commit()
-        db.refresh(current_user)
-        logger.info(f"Google OAuth successfully linked for user {current_user.email}")
-        return {
-            "success": True,
-            "google_verified": True,
-            "message": "Google account successfully linked"
-        }
-    except Exception as e:
-        logger.error(f"Error during Google OAuth callback: {str(e)}", exc_info=True)
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to link Google account: {str(e)}"
         )
 

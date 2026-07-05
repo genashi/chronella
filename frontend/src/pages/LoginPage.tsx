@@ -57,6 +57,7 @@ const LoginPage: React.FC = () => {
       if (response.ok) {
         if (data.access_token) {
           localStorage.setItem('access_token', data.access_token);
+          console.log('Token saved:', localStorage.getItem('access_token'));
           console.log('Success');
           setMessage({
             text: 'Вход выполнен успешно!',
@@ -105,6 +106,7 @@ const LoginPage: React.FC = () => {
   return (
     <Box
       sx={{
+        width: '100%',
         minHeight: '100vh',
         display: 'flex',
         alignItems: 'center',
@@ -117,16 +119,17 @@ const LoginPage: React.FC = () => {
         elevation={0}
         sx={{
           padding: { xs: 3, sm: 4, md: 5 },
-          width: '100%',
           maxWidth: 450,
+          width: '100%', 
           borderRadius: 3,
           border: '1px solid',
           borderColor: 'divider',
           display: 'flex',
           flexDirection: 'column',
+          margin: '0 auto'
         }}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 4, alignSelf: 'flex-start' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 4 }}>
           <LoginIcon
             color="primary"
             sx={{
@@ -166,7 +169,6 @@ const LoginPage: React.FC = () => {
             width: '100%',
             display: 'flex',
             flexDirection: 'column',
-            alignItems: 'center',
           }}
         >
           <TextField
@@ -181,7 +183,6 @@ const LoginPage: React.FC = () => {
             onChange={(e) => setEmail(e.target.value)}
             autoFocus
             sx={{
-              maxWidth: 400,
               '& .MuiOutlinedInput-root': {
                 borderRadius: 2,
               },
@@ -199,7 +200,6 @@ const LoginPage: React.FC = () => {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             sx={{
-              maxWidth: 400,
               '& .MuiOutlinedInput-root': {
                 borderRadius: 2,
               },
@@ -214,7 +214,6 @@ const LoginPage: React.FC = () => {
             sx={{
               mt: 4,
               mb: 2,
-              maxWidth: 400,
               borderRadius: 2,
               textTransform: 'none',
               py: 1.5,

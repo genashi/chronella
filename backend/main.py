@@ -1,4 +1,7 @@
-# backend/main.py
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware # Для связи React и FastAPI
@@ -6,16 +9,15 @@ from fastapi.middleware.cors import CORSMiddleware # Для связи React и 
 # !!! НОВЫЕ ИМПОРТЫ !!!
 from app import models
 from app.database import engine, Base
-from app.routers import auth, users, google_auth
+from app.routers import auth, users, google_auth, schedule, performance
 
-from dotenv import load_dotenv
-import os
+
 
 # Создаем все таблицы, которые наследуются от Base, в базе данных
 # Это создает файл database.db, если он еще не существует.
+
 Base.metadata.create_all(bind=engine)
 
-load_dotenv()
 print(f"DEBUG: Client ID is {os.getenv('GOOGLE_CLIENT_ID')}")
 
 # Создаем экземпляр приложения FastAPI
@@ -49,9 +51,11 @@ def read_root():
     return {"message": "Hello from Chronella FastAPI Backend!"}
 
 # Подключаем роутеры
+app.include_router(schedule.router)
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(google_auth.router)
+app.include_router(performance.router)
 
 # Документация: FastAPI автоматически создает интерактивную документацию
 # Ее можно будет посмотреть по адресу: http://127.0.0.1:8000/docs

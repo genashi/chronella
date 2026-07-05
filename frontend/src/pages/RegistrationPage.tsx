@@ -186,7 +186,7 @@ const RegistrationPage: React.FC = () => {
             required
             fullWidth
             id="email"
-            label="Email (для входа)"
+            label="Email"
             name="email"
             autoComplete="email"
             value={email}

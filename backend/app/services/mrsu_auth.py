@@ -40,11 +40,13 @@ class MRSUAuthService:
                     "client_secret": "qweasd"  # Замени на реальный
                 }
             )
+            print(f"MRSU status: {response.status_code}")
+            print(f"MRSU response: {response.text}") 
             if response.status_code != 200:
                 raise HTTPException(status_code=response.status_code, detail=response.json().get("error", "Unknown error"))
             token_data = response.json()
             # Сохрани token_data['access_token'] в DB для current_user
-            return {"message": "Linked successfully", "token": token_data['access_token']}
+            return {"message": "Linked successfully", "access_token": token_data['access_token']}
 
     async def get_user_info(self, token: str):
         """Получает информацию о пользователе (ФИО, группа)"""
