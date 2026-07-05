@@ -204,7 +204,7 @@ const SetupPage: React.FC = () => {
       completed: profileStatus.google_linked,
     },
     {
-      label: 'Все готово',
+      label: 'Настройка окончена',
       completed: (profileStatus.is_mrsu_verified || profileStatus.mrsu_linked) && profileStatus.google_linked,
     },
   ];
@@ -282,7 +282,7 @@ const SetupPage: React.FC = () => {
                   color: 'text.secondary',
                 }}
               >
-                Введите ваши учетные данные для входа в ЭИОС Мордовского университета
+                Введите ваши учетные данные для входа в ЭИОС
               </Typography>
 
               <TextField
@@ -364,7 +364,7 @@ const SetupPage: React.FC = () => {
                   color: 'text.secondary',
                 }}
               >
-                Привяжите ваш Google аккаунт для синхронизации календаря и других сервисов
+                Привяжите ваш Google аккаунт
               </Typography>
 
               <Button
@@ -404,7 +404,7 @@ const SetupPage: React.FC = () => {
                 Все системы готовы!
               </Typography>
               <Typography sx={{ mb: 4, color: 'text.secondary', fontFamily: 'Inter, sans-serif' }}>
-                Вы успешно прошли настройку. Теперь можно перейти в личный кабинет.
+                Вы успешно прошли настройку.
               </Typography>
               <Button
                 fullWidth

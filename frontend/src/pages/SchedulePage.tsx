@@ -8,7 +8,7 @@ import {
 import {
   CalendarMonth as CalendarIcon, Add as AddIcon, Sync as SyncIcon,
   Google as GoogleIcon, CheckCircle as VisitedIcon, Cancel as MissedIcon,
-  ChevronLeft, ChevronRight, Edit as EditIcon, Warning as WarningIcon
+  ChevronLeft, ChevronRight, Edit as EditIcon, Assessment as AssessmentIcon
 } from '@mui/icons-material';
 import { LocalizationProvider, DatePicker } from '@mui/x-date-pickers';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
@@ -54,11 +54,19 @@ interface Event {
   is_modified: boolean;
 }
 
+interface DailyDetail {
+  day: string;
+  load: number;
+  ewma: number;
+  z_score: number;
+  status: 'crit' | 'warn' | 'rest' | 'ok';
+}
+
 interface AnalyticsData {
   mean_load: number;
+  stdev_load: number;
   cv: number;
-  good: string[];
-  improve: string[];
+  daily_details: DailyDetail[];
 }
 
 const formatTime = (iso: string) =>
@@ -228,22 +236,13 @@ function SyncDialog({ open, onClose, onSync, syncing }: SyncDialogProps) {
 interface ExportDialogProps {
   open: boolean;
   onClose: () => void;
-  onExport: (from: string, to: string, types: string[]) => void;
+  onExport: (from: string, to: string) => void; // Убрали types
   currentDate: Date;
 }
 
 function ExportDialog({ open, onClose, onExport, currentDate }: ExportDialogProps) {
   const [from, setFrom] = useState<Dayjs | null>(dayjsWeekStart(dayjs(currentDate)));
   const [to, setTo] = useState<Dayjs | null>(dayjsWeekEnd(dayjs(currentDate)));
-  const [selectedTypes, setSelectedTypes] = useState<string[]>(
-    ['lecture', 'practice', 'lab', 'exam', 'deadline', 'custom']
-  );
-
-  const toggleType = (type: string) => {
-    setSelectedTypes(prev =>
-      prev.includes(type) ? prev.filter(t => t !== type) : [...prev, type]
-    );
-  };
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth
@@ -258,24 +257,9 @@ function ExportDialog({ open, onClose, onExport, currentDate }: ExportDialogProp
               slotProps={{ textField: { size: 'small', fullWidth: true } }} />
             <DatePicker label="По" value={to} onChange={setTo}
               slotProps={{ textField: { size: 'small', fullWidth: true } }} />
-            <Typography sx={{ fontFamily: 'Inter, sans-serif', fontSize: '0.8rem', color: 'text.secondary' }}>
-              Типы событий:
+            <Typography sx={{ fontFamily: 'Inter, sans-serif', fontSize: '0.85rem', color: 'text.secondary' }}>
+              Все события за выбранный период будут скопированы в календарь "Chronella".
             </Typography>
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-              {Object.entries(TYPE_LABELS).map(([k, v]) => (
-                <Chip
-                  key={k}
-                  label={v}
-                  onClick={() => toggleType(k)}
-                  variant={selectedTypes.includes(k) ? 'filled' : 'outlined'}
-                  sx={{
-                    bgcolor: selectedTypes.includes(k) ? TYPE_COLORS[k] : 'transparent',
-                    fontFamily: 'Inter, sans-serif',
-                    cursor: 'pointer',
-                  }}
-                />
-              ))}
-            </Box>
           </Stack>
         </LocalizationProvider>
       </DialogContent>
@@ -286,8 +270,8 @@ function ExportDialog({ open, onClose, onExport, currentDate }: ExportDialogProp
         <Button
           variant="contained"
           startIcon={<GoogleIcon />}
-          onClick={() => from && to && onExport(from.format('YYYY-MM-DD'), to.format('YYYY-MM-DD'), selectedTypes)}
-          disabled={!from || !to || selectedTypes.length === 0}
+          onClick={() => from && to && onExport(from.format('YYYY-MM-DD'), to.format('YYYY-MM-DD'))}
+          disabled={!from || !to}
           sx={{ textTransform: 'none', boxShadow: 'none', borderRadius: 2, fontFamily: 'Inter, sans-serif' }}
         >
           Экспортировать
@@ -315,8 +299,8 @@ function EventCard({ event, onVisitToggle, onEdit }: {
         <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
           <Box sx={{ flex: 1 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-              <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', fontFamily: 'Inter, sans-serif' }}>
-                {formatTime(event.start_at)}–{formatTime(event.end_at)}
+              <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', fontFamily: 'Inter, sans-serif', fontWeight: event.type === 'deadline' ? 600 : 400 }}>
+                {event.type === 'deadline' ? 'Весь день' : `${formatTime(event.start_at)}–${formatTime(event.end_at)}`}
               </Typography>
               <Chip label={getTypeLabel(event.type)} size="small" sx={{
                 bgcolor: TYPE_COLORS[event.type || 'custom'] || 'var(--md-sys-color-surface-container)',
@@ -370,52 +354,126 @@ function EventCard({ event, onVisitToggle, onEdit }: {
   );
 }
 
-function WorkloadAnalysis({ data }: { data: AnalyticsData | null }) {
-  if (!data || (data.good.length === 0 && data.improve.length === 0)) return null;
+function WorkloadAnalysis({ data, loading, onAnalyze }: { data: AnalyticsData | null, loading: boolean, onAnalyze: () => void }) {
+  const STATUS_MAP = {
+    crit: { label: 'Пик нагрузки',  hint: 'Очень насыщенный день — спланируйте отдых заранее',   color: 'error.main',   bg: '#FCEBEB' },
+    warn: { label: 'Напряжённый',   hint: 'Нагрузка выше нормы — старайтесь не добавлять задачи', color: 'warning.main', bg: '#FAEEDA' },
+    ok:   { label: 'В норме',        hint: 'Рабочая загруженность без критичных пиков',             color: 'success.main', bg: '#EAF3DE' },
+    rest: { label: 'Лёгкий день',   hint: 'Нагрузка минимальна — хорошее время для отдыха',       color: 'info.main',    bg: '#E6F1FB' },
+  };
+
+  const cvLabel = (cv: number) => {
+    if (cv <= 60) return { text: 'Равномерно',    color: 'success.main' };
+    if (cv <= 90) return { text: 'Умеренно',      color: 'warning.main' };
+    return               { text: 'Неравномерно',  color: 'error.main'   };
+  };
+
+  const summaryText = (d: AnalyticsData) => {
+    const crits = d.daily_details.filter(x => x.status === 'crit');
+    if (crits.length >= 2) return `${crits.length} дня с пиковой нагрузкой (${crits.map(x => x.day).join(', ')}). Рассмотрите перераспределение задач.`;
+    if (crits.length === 1) return `Критический пик в ${crits[0].day}.`;
+    if (d.cv <= 60) return 'Нагрузка распределена равномерно.';
+    return 'Нагрузка в норме, есть незначительные колебания.';
+  };
+
+  const maxLoad = data ? Math.max(...data.daily_details.map(d => d.load), 1) : 1;
 
   return (
     <Card elevation={0} sx={{
       border: '1px solid', borderColor: 'divider', borderRadius: 3,
-      bgcolor: 'var(--md-sys-color-surface-container-lowest)'
+      bgcolor: 'var(--md-sys-color-surface-container-lowest)',
+      minHeight: 320, display: 'flex', flexDirection: 'column'
     }}>
-      <CardContent sx={{ p: 3 }}>
-        <Typography variant="h6" sx={{ fontFamily: 'EB Garamond, serif', mb: 2 }}>
+      <CardContent sx={{ p: 3, flex: 1, display: 'flex', flexDirection: 'column' }}>
+        <Typography variant="h6" sx={{ fontFamily: 'EB Garamond, serif', mb: 0.5 }}>
           Анализ загруженности
         </Typography>
-        
-        <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
-          <Box>
-            <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', fontFamily: 'Inter' }}>Нагрузка</Typography>
-            <Typography sx={{ fontFamily: 'Inter', fontWeight: 600 }}>{data.mean_load} ч/дн</Typography>
-          </Box>
-          <Box>
-            <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', fontFamily: 'Inter' }}>Неравномерность</Typography>
-            <Typography sx={{ fontFamily: 'Inter', fontWeight: 600 }}>{data.cv}%</Typography>
-          </Box>
-        </Box>
+        <Typography variant="body2" color="text.secondary" sx={{ fontFamily: 'Inter', mb: 2 }}>
+          Распределение учебной нагрузки на неделю
+        </Typography>
 
-        {data.good.length > 0 && (
-          <Box sx={{ mb: 2 }}>
-            <Typography sx={{ fontSize: '0.8rem', fontWeight: 600, color: 'success.main', mb: 1, fontFamily: 'Inter' }}>Хорошо</Typography>
-            {data.good.map((text, i) => (
-              <Box key={i} sx={{ display: 'flex', gap: 1, mb: 0.5, alignItems: 'flex-start' }}>
-                <VisitedIcon color="success" sx={{ fontSize: 16, mt: 0.2 }} />
-                <Typography sx={{ fontSize: '0.85rem', fontFamily: 'Inter' }}>{text}</Typography>
-              </Box>
-            ))}
+        {/* Пустое состояние */}
+        {!data && !loading && (
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, gap: 2, py: 2 }}>
+            <AssessmentIcon sx={{ fontSize: 40, color: 'text.disabled' }} />
+            <Typography align="center" sx={{ fontSize: '0.85rem', color: 'text.secondary', fontFamily: 'Inter', maxWidth: 240, lineHeight: 1.6 }}>
+              Система оценит каждый день и подскажет, когда нагрузка слишком высокая или можно расслабиться.
+            </Typography>
+            <Button variant="contained" startIcon={<AssessmentIcon />} onClick={onAnalyze}
+              sx={{ borderRadius: 2, textTransform: 'none', fontFamily: 'Inter', boxShadow: 'none' }}>
+              Провести анализ
+            </Button>
           </Box>
         )}
 
-        {data.improve.length > 0 && (
-          <Box>
-            <Typography sx={{ fontSize: '0.8rem', fontWeight: 600, color: 'error.main', mb: 1, fontFamily: 'Inter' }}>Исправить</Typography>
-            {data.improve.map((text, i) => (
-              <Box key={i} sx={{ display: 'flex', gap: 1, mb: 0.5, alignItems: 'flex-start' }}>
-                <WarningIcon color="error" sx={{ fontSize: 16, mt: 0.2 }} />
-                <Typography sx={{ fontSize: '0.85rem', fontFamily: 'Inter' }}>{text}</Typography>
-              </Box>
-            ))}
+        {/* Загрузка */}
+        {loading && (
+          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flex: 1 }}>
+            <CircularProgress size={32} />
           </Box>
+        )}
+
+        {/* Результат */}
+        {data && !loading && (
+          <>
+            {/* Статы */}
+            <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 1, mb: 2 }}>
+              {[
+                { label: 'Среднее в день', value: `${data.mean_load.toFixed(1)} ч` },
+                { label: 'Разброс',        value: `±${data.stdev_load.toFixed(1)} ч` },
+              ].map(s => (
+                <Box key={s.label} sx={{ bgcolor: 'var(--md-sys-color-surface-container)', borderRadius: 2, p: 1.25 }}>
+                  <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary', fontFamily: 'Inter', mb: 0.5 }}>{s.label}</Typography>
+                  <Typography sx={{ fontFamily: 'Inter', fontWeight: 600 }}>{s.value}</Typography>
+                </Box>
+              ))}
+              <Box sx={{ bgcolor: 'var(--md-sys-color-surface-container)', borderRadius: 2, p: 1.25 }}>
+                <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary', fontFamily: 'Inter', mb: 0.5 }}>Равномерность</Typography>
+                <Typography sx={{ fontFamily: 'Inter', fontWeight: 600, color: cvLabel(data.cv).color }}>
+                  {cvLabel(data.cv).text}
+                </Typography>
+              </Box>
+            </Box>
+
+            {/* Таблица по дням */}
+            <Stack spacing={0.25}>
+              {data.daily_details.map((d, i) => {
+                const s = STATUS_MAP[d.status];
+                const pct = Math.round((d.load / maxLoad) * 100);
+                return (
+                  <Tooltip key={d.day} title={s.hint} placement="left" arrow>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 1, py: 0.75, borderRadius: 2, '&:hover': { bgcolor: 'var(--md-sys-color-surface-container)' } }}>
+                      <Typography sx={{ width: 28, fontSize: '0.8rem', fontWeight: 600, fontFamily: 'Inter' }}>
+                        {DAYS_SHORT[i]}
+                      </Typography>
+                      <Box sx={{ flex: 1, height: 4, bgcolor: 'divider', borderRadius: 2, overflow: 'hidden' }}>
+                        <Box sx={{ width: `${pct}%`, height: '100%', bgcolor: s.color, borderRadius: 2 }} />
+                      </Box>
+                      <Typography sx={{ width: 36, fontSize: '0.75rem', color: 'text.secondary', fontFamily: 'Inter', textAlign: 'right' }}>
+                        {d.load.toFixed(1)} ч
+                      </Typography>
+                      <Chip label={s.label} size="small" sx={{
+                        bgcolor: s.bg, color: s.color,
+                        fontWeight: 600, fontSize: '0.65rem', height: 20, fontFamily: 'Inter', minWidth: 90
+                      }} />
+                    </Box>
+                  </Tooltip>
+                );
+              })}
+            </Stack>
+
+            {/* Итоговый вывод */}
+            <Box sx={{ mt: 1.5, p: 1.5, bgcolor: 'var(--md-sys-color-surface-container)', borderRadius: 2 }}>
+              <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary', fontFamily: 'Inter', lineHeight: 1.6 }}>
+                {summaryText(data)}
+              </Typography>
+            </Box>
+
+            <Button fullWidth variant="outlined" size="small" onClick={onAnalyze}
+              sx={{ mt: 1.5, borderRadius: 2, textTransform: 'none', fontFamily: 'Inter' }}>
+              Обновить расчёт
+            </Button>
+          </>
         )}
       </CardContent>
     </Card>
@@ -428,6 +486,7 @@ export default function SchedulePage() {
   const [events, setEvents] = useState<Event[]>([]);
   const [analysisData, setAnalysisData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(false);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [syncResult, setSyncResult] = useState<string | null>(null);
@@ -444,6 +503,10 @@ export default function SchedulePage() {
   const weekDays = getWeekDays(weekStart);
   const todayStr = toDateStr(new Date());
 
+  useEffect(() => {
+    setAnalysisData(null);
+  }, [weekStart.getTime()]);
+
   const loadEvents = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -456,15 +519,6 @@ export default function SchedulePage() {
       const res = await fetch(endpoint, { headers });
       if (!res.ok) throw new Error();
       setEvents(await res.json());
-
-      if (viewMode === 'week') {
-        const resAnalytics = await fetch(`${API_URL}/schedule/analytics/week?date=${dateStr}`, { headers });
-        if (resAnalytics.ok) {
-          setAnalysisData(await resAnalytics.json());
-        } else {
-          setAnalysisData(null);
-        }
-      }
     } catch {
       setError('Не удалось загрузить расписание');
     } finally {
@@ -473,6 +527,24 @@ export default function SchedulePage() {
   }, [selectedDate, viewMode]);
 
   useEffect(() => { loadEvents(); }, [loadEvents]);
+
+  const handleAnalyze = async () => {
+    setAnalyticsLoading(true);
+    setError(null);
+    try {
+      const dateStr = toDateStr(selectedDate);
+      const resAnalytics = await fetch(`${API_URL}/schedule/analytics/week?date=${dateStr}`, { headers });
+      if (resAnalytics.ok) {
+        setAnalysisData(await resAnalytics.json());
+      } else {
+        throw new Error('Ошибка анализа');
+      }
+    } catch {
+      setError('Не удалось провести анализ');
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  };
 
   const handleSync = async (from: string, to: string) => {
     setSyncing(true);
@@ -495,17 +567,36 @@ export default function SchedulePage() {
     } 
   };
 
-  const handleExportToGoogle = async (dateFrom: string, dateTo: string, types: string[]) => {
+  const handleExportToGoogle = async (dateFrom: string, dateTo: string) => {
+    setError(null);
     try {
+      const currentToken = localStorage.getItem('access_token');
+      if (!currentToken) {
+        setError('Сессия истекла. Пожалуйста, войдите в систему заново.');
+        return;
+      }
+
       const params = new URLSearchParams({
         date_from: dateFrom,
         date_to: dateTo,
-        types: types.join(','),
       });
+
+      // Формируем headers прямо здесь, чтобы гарантировать актуальность токена
       const res = await fetch(`${API_URL}/schedule/export?${params}`, {
-        method: 'POST', headers,
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${currentToken}`,
+          'Content-Type': 'application/json'
+        },
       });
+      
+      if (res.status === 401 || res.status === 403) {
+          setError('Ошибка авторизации Google. Пожалуйста, привяжите аккаунт заново в профиле.');
+          setExportDialogOpen(false);
+          return;
+      }
       if (!res.ok) throw new Error();
+      
       const data = await res.json();
       setSyncResult(`Экспортировано в Google: ${data.exported} событий`);
       setExportDialogOpen(false);
@@ -582,33 +673,33 @@ export default function SchedulePage() {
 
   return (
     <AppLayout>
-      <Box sx={{ p: 3, maxWidth: 1200, mx: 'auto' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2, flexWrap: 'wrap', gap: 1 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-            <CalendarIcon sx={{ color: 'primary.main', fontSize: 26 }} />
-            <Typography variant="h5" sx={{ fontFamily: 'Lora, serif' }}>Расписание</Typography>
-          </Box>
-          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-            <Button startIcon={<SyncIcon />} variant="outlined" size="small"
-              onClick={() => setSyncDialogOpen(true)}
-              sx={{ borderRadius: 3, textTransform: 'none', fontFamily: 'Inter, sans-serif' }}>
-              Загрузить из ЭИОС
-            </Button>
-            <Button startIcon={<AddIcon />} variant="outlined" size="small"
-              onClick={handleAddNew}
-              sx={{ borderRadius: 3, textTransform: 'none', fontFamily: 'Inter, sans-serif' }}>
-              Добавить событие
-            </Button>
-            <Button
-              startIcon={<GoogleIcon />}
-              variant="contained"
-              size="small"
-              onClick={() => setExportDialogOpen(true)}
-              sx={{ borderRadius: 3, textTransform: 'none', boxShadow: 'none', fontFamily: 'Inter, sans-serif' }}
-            >
-              В Google Календарь
-            </Button>
-          </Box>
+      <Box sx={{ p: { xs: 2, md: 4 }, flex: 1, display: 'flex', flexDirection: 'column', width: '100%' }}>
+        
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 5 }}>
+          <CalendarIcon sx={{ color: 'primary.main', fontSize: 28 }} />
+          <Typography variant="h4" sx={{ fontFamily: 'Lora, serif' }}>Расписание</Typography>
+        </Box>
+
+        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', justifyContent: 'flex-start', mb: 3 }}>
+          <Button startIcon={<SyncIcon />} variant="outlined" size="small"
+            onClick={() => setSyncDialogOpen(true)}
+            sx={{ borderRadius: 3, textTransform: 'none', fontFamily: 'Inter, sans-serif' }}>
+            Загрузить из ЭИОС
+          </Button>
+          <Button startIcon={<AddIcon />} variant="outlined" size="small"
+            onClick={handleAddNew}
+            sx={{ borderRadius: 3, textTransform: 'none', fontFamily: 'Inter, sans-serif' }}>
+            Добавить событие
+          </Button>
+          <Button
+            startIcon={<GoogleIcon />}
+            variant="contained"
+            size="small"
+            onClick={() => setExportDialogOpen(true)}
+            sx={{ borderRadius: 3, textTransform: 'none', boxShadow: 'none', fontFamily: 'Inter, sans-serif' }}
+          >
+            В Google Календарь
+          </Button>
         </Box>
 
         {error && <Alert severity="error" sx={{ mb: 2, borderRadius: 2 }}>{error}</Alert>}
@@ -618,25 +709,25 @@ export default function SchedulePage() {
           </Alert>
         )}
 
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 3, mb: 4 }}>
           <ToggleButtonGroup value={viewMode} exclusive onChange={(_, v) => v && setViewMode(v)} size="small"
-            sx={{ '& .MuiToggleButton-root': { textTransform: 'none', fontFamily: 'Inter, sans-serif', px: 2 } }}>
+            sx={{ '& .MuiToggleButton-root': { textTransform: 'none', fontFamily: 'Inter, sans-serif', px: 3 } }}>
             <ToggleButton value="day">День</ToggleButton>
             <ToggleButton value="week">Неделя</ToggleButton>
           </ToggleButtonGroup>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <IconButton size="small" onClick={() => navigate(-1)}><ChevronLeft /></IconButton>
-            <Typography sx={{ fontFamily: 'Inter, sans-serif', fontSize: '0.875rem', minWidth: 160, textAlign: 'center' }}>
+            <Typography sx={{ fontFamily: 'Inter, sans-serif', fontSize: '1rem', minWidth: 200, textAlign: 'center', fontWeight: 500 }}>
               {viewMode === 'week'
-                ? `${weekStart.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })} – ${weekDays[6].toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })}`
+                ? `${weekStart.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })} – ${weekDays[6].toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })}`
                 : selectedDate.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })}
             </Typography>
             <IconButton size="small" onClick={() => navigate(1)}><ChevronRight /></IconButton>
           </Box>
         </Box>
 
-        <Grid container spacing={3}>
-          <Grid item xs={12} md={viewMode === 'week' ? 8 : 12}>
+        <Grid container spacing={4} sx={{ flex: 1, width: '100%', margin: 0 }}>
+          <Grid item xs={12} md={viewMode === 'week' ? 6 : 12} sx={{ width: '45%', display: 'flex', flexDirection: 'column' }}>
             {viewMode === 'day' && (
               <Box sx={{ display: 'flex', gap: 1, mb: 3 }}>
                 {weekDays.map((day, i) => {
@@ -645,15 +736,15 @@ export default function SchedulePage() {
                   const isToday = dayStr === todayStr;
                   return (
                     <Box key={i} onClick={() => setSelectedDate(new Date(day))} sx={{
-                      flex: 1, textAlign: 'center', py: 1, borderRadius: 3, cursor: 'pointer',
+                      flex: 1, textAlign: 'center', py: 1.5, borderRadius: 3, cursor: 'pointer',
                       bgcolor: isSelected ? 'var(--md-sys-color-primary-container)' : 'var(--md-sys-color-surface-container)',
                       border: '2px solid', borderColor: isToday ? 'primary.main' : 'transparent',
                       transition: 'all 0.15s', '&:hover': { bgcolor: 'var(--md-sys-color-secondary-container)' },
                     }}>
-                      <Typography sx={{ fontSize: '0.7rem', fontFamily: 'Inter, sans-serif', fontWeight: isSelected ? 700 : 400, color: isSelected ? 'var(--md-sys-color-on-primary-container)' : 'text.secondary' }}>
+                      <Typography sx={{ fontSize: '0.75rem', fontFamily: 'Inter, sans-serif', fontWeight: isSelected ? 700 : 500, color: isSelected ? 'var(--md-sys-color-on-primary-container)' : 'text.secondary' }}>
                         {DAYS_SHORT[i]}
                       </Typography>
-                      <Typography sx={{ fontSize: '0.85rem', fontFamily: 'Inter, sans-serif', fontWeight: isSelected ? 700 : 400, color: isSelected ? 'var(--md-sys-color-on-primary-container)' : 'text.primary' }}>
+                      <Typography sx={{ fontSize: '1rem', fontFamily: 'Inter, sans-serif', fontWeight: isSelected ? 800 : 500, color: isSelected ? 'var(--md-sys-color-on-primary-container)' : 'text.primary' }}>
                         {day.getDate()}
                       </Typography>
                     </Box>
@@ -665,7 +756,7 @@ export default function SchedulePage() {
             {loading ? (
               <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}><CircularProgress /></Box>
             ) : viewMode === 'day' ? (
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 {dayEvents.length === 0
                   ? <Typography sx={{ textAlign: 'center', py: 6, color: 'text.secondary', fontFamily: 'Inter, sans-serif' }}>
                       Пока ничего нет. Загрузите расписание из ЭИОС или добавьте событие самостоятельно.
@@ -679,32 +770,32 @@ export default function SchedulePage() {
                   const isToday = dayStr === todayStr;
                   return (
                     <Box key={i}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, py: 1.5, position: 'sticky', top: 0, bgcolor: 'background.default', zIndex: 1 }}>
-                        <Box sx={{ width: 36, height: 36, borderRadius: '50%', bgcolor: isToday ? 'primary.main' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                          <Typography sx={{ fontFamily: 'Inter, sans-serif', fontWeight: 700, fontSize: '0.9rem', color: isToday ? 'white' : 'text.primary' }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 2, position: 'sticky', top: 0, bgcolor: 'background.default', zIndex: 1 }}>
+                        <Box sx={{ width: 42, height: 42, borderRadius: '50%', bgcolor: isToday ? 'primary.main' : 'var(--md-sys-color-surface-container)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          <Typography sx={{ fontFamily: 'Inter, sans-serif', fontWeight: 800, fontSize: '1rem', color: isToday ? 'white' : 'text.primary' }}>
                             {date.getDate()}
                           </Typography>
                         </Box>
                         <Box>
-                          <Typography sx={{ fontFamily: 'Inter, sans-serif', fontWeight: isToday ? 700 : 500, fontSize: '0.9rem', color: isToday ? 'primary.main' : 'text.primary', textTransform: 'capitalize' }}>
+                          <Typography sx={{ fontFamily: 'Inter, sans-serif', fontWeight: isToday ? 800 : 600, fontSize: '1rem', color: isToday ? 'primary.main' : 'text.primary', textTransform: 'capitalize' }}>
                             {DAYS_FULL[i]}
                           </Typography>
-                          <Typography sx={{ fontSize: '0.7rem', color: 'text.secondary', fontFamily: 'Inter, sans-serif' }}>
-                            {date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}
+                          <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary', fontFamily: 'Inter, sans-serif' }}>
+                            {date.toLocaleDateString('ru-RU', { month: 'long' })}
                           </Typography>
                         </Box>
                         <Box sx={{ flex: 1 }} />
                         {dayEvs.length > 0 && (
-                          <Chip label={`${dayEvs.length} зан.`} size="small" sx={{ bgcolor: 'var(--md-sys-color-surface-container)', fontFamily: 'Inter, sans-serif', fontSize: '0.65rem' }} />
+                          <Chip label={`${dayEvs.length} зан.`} size="small" sx={{ bgcolor: 'var(--md-sys-color-surface-container-high)', fontFamily: 'Inter, sans-serif', fontWeight: 600 }} />
                         )}
                       </Box>
-                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 1 }}>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, mb: 2 }}>
                         {dayEvs.length === 0
-                          ? <Typography sx={{ fontFamily: 'Inter, sans-serif', fontSize: '0.8rem', color: 'text.disabled', pl: 1, pb: 1 }}>Занятий нет</Typography>
+                          ? <Typography sx={{ fontFamily: 'Inter, sans-serif', fontSize: '0.85rem', color: 'text.disabled', pl: 1, pb: 1 }}>Занятий нет</Typography>
                           : dayEvs.map(e => <EventCard key={e.id} event={e} onVisitToggle={handleVisitToggle} onEdit={handleEdit} />)
                         }
                       </Box>
-                      {i < 6 && <Divider sx={{ mb: 0.5 }} />}
+                      {i < 6 && <Divider sx={{ mb: 1 }} />}
                     </Box>
                   );
                 })}
@@ -713,9 +804,9 @@ export default function SchedulePage() {
           </Grid>
 
           {viewMode === 'week' && (
-            <Grid item xs={12} md={4}>
-              <Box sx={{ position: 'sticky', top: 16 }}>
-                <WorkloadAnalysis data={analysisData} />
+            <Grid item xs={12} md={6 as any}>
+              <Box sx={{ position: 'sticky', top: 24, pl: { md: 2 } }}>
+                <WorkloadAnalysis data={analysisData} loading={analyticsLoading} onAnalyze={handleAnalyze} />
               </Box>
             </Grid>
           )}

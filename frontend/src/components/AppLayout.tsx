@@ -1,14 +1,20 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
-  Box, Typography, IconButton, Tooltip, Avatar, Divider
+  Box, Typography, IconButton, Tooltip
 } from '@mui/material';
 import {
   CalendarMonth as CalendarIcon,
   School as GradesIcon,
   AccountCircle as ProfileIcon,
   Logout as LogoutIcon,
+  ViewTimeline as LogoIcon
 } from '@mui/icons-material';
+import ProfileDialog from './ProfileDialog'; 
+
+const SIDEBAR_WIDTH = 104; 
+const PILL_WIDTH = 64;     
+const PILL_HEIGHT = 32;    
 
 interface NavItem {
   label: string;
@@ -17,8 +23,8 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { label: 'Расписание', icon: <CalendarIcon />, path: '/schedule' },
-  { label: 'Успеваемость', icon: <GradesIcon />, path: '/grades' },
+  { label: 'Расписание', icon: <CalendarIcon fontSize="small" />, path: '/schedule' },
+  { label: 'Успеваемость', icon: <GradesIcon fontSize="small" />, path: '/grades' },
 ];
 
 interface AppLayoutProps {
@@ -28,6 +34,7 @@ interface AppLayoutProps {
 export default function AppLayout({ children }: AppLayoutProps) {
   const navigate = useNavigate();
   const location = useLocation();
+  const [profileOpen, setProfileOpen] = useState(false);
 
   const handleLogout = () => {
     localStorage.removeItem('access_token');
@@ -35,95 +42,107 @@ export default function AppLayout({ children }: AppLayoutProps) {
   };
 
   return (
-    <Box sx={{ display: 'flex', height: '100vh', bgcolor: 'background.default' }}>
-      {/* Navigation Rail */}
+    <Box sx={{ display: 'flex', height: '100vh', width: '100vw', bgcolor: 'var(--md-sys-color-surface)' }}>
+      {/* --- ЛЕВЫЙ САЙДБАР --- */}
       <Box
         sx={{
-          width: 80,
+          width: SIDEBAR_WIDTH,
+          height: '100%',
+          bgcolor: 'var(--md-sys-color-surface-container-low)',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
           py: 2,
-          gap: 1,
-          bgcolor: 'var(--md-sys-color-surface-container)',
+          boxSizing: 'border-box',
           borderRight: '1px solid',
           borderColor: 'divider',
-          flexShrink: 0,
         }}
       >
-        {/* Логотип */}
-        <Typography
-          sx={{
-            fontFamily: 'Lora, serif',
-            fontSize: '0.7rem',
-            fontWeight: 700,
-            color: 'primary.main',
-            mb: 2,
-            letterSpacing: 1,
-            textTransform: 'uppercase',
-          }}
-        >
-          Chr
-        </Typography>
+        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5, mb: 4, mt: 1 }}>
+          <LogoIcon sx={{ color: 'primary.main', fontSize: 28 }} />
+          <Typography
+            sx={{
+              fontFamily: 'Lora, serif',
+              fontWeight: 700,
+              fontSize: '0.9rem',
+              color: 'primary.main',
+              letterSpacing: '0.5px'
+            }}
+          >
+            Chronella
+          </Typography>
+        </Box>
 
-        <Divider sx={{ width: '50%', mb: 1 }} />
-
-        {/* Nav items */}
-        {NAV_ITEMS.map((item) => {
-          const active = location.pathname.startsWith(item.path);
-          return (
-            <Tooltip key={item.path} title={item.label} placement="right">
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, width: '100%' }}>
+          {NAV_ITEMS.map((item) => {
+            const active = location.pathname.startsWith(item.path);
+            return (
               <Box
+                key={item.path}
                 onClick={() => navigate(item.path)}
                 sx={{
-                  width: 56,
-                  height: 56,
-                  borderRadius: 4,
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: 'pointer',
-                  bgcolor: active ? 'var(--md-sys-color-secondary-container)' : 'transparent',
-                  color: active ? 'var(--md-sys-color-on-secondary-container)' : 'text.secondary',
-                  transition: 'all 0.2s',
                   gap: 0.5,
-                  '&:hover': {
-                    bgcolor: active
-                      ? 'var(--md-sys-color-secondary-container)'
-                      : 'var(--md-sys-color-surface-container-high)',
-                  },
+                  cursor: 'pointer',
+                  width: '100%',
                 }}
               >
-                {item.icon}
-                <Typography sx={{ fontSize: '0.6rem', fontFamily: 'Inter, sans-serif' }}>
+                <Box
+                  sx={{
+                    width: PILL_WIDTH,
+                    height: PILL_HEIGHT,
+                    borderRadius: 10,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    bgcolor: active ? 'var(--md-sys-color-secondary-container)' : 'transparent',
+                    color: active ? 'var(--md-sys-color-on-secondary-container)' : 'text.secondary',
+                  }}
+                >
+                  {item.icon}
+                </Box>
+
+                <Typography
+                  sx={{
+                    fontSize: '0.75rem',
+                    fontFamily: 'Inter, sans-serif',
+                    fontWeight: active ? 700 : 500,
+                    color: active ? 'text.primary' : 'text.secondary',
+                    textAlign: 'center',
+                    lineHeight: 1.2
+                  }}
+                >
                   {item.label}
                 </Typography>
               </Box>
-            </Tooltip>
-          );
-        })}
+            );
+          })}
+        </Box>
 
-        {/* Spacer */}
         <Box sx={{ flex: 1 }} />
 
-        {/* Profile & Logout */}
         <Tooltip title="Профиль" placement="right">
-          <IconButton sx={{ color: 'text.secondary' }}>
+          <IconButton onClick={() => setProfileOpen(true)} sx={{ color: 'text.secondary', mb: 1 }}>
             <ProfileIcon />
           </IconButton>
         </Tooltip>
+        
         <Tooltip title="Выйти" placement="right">
-          <IconButton onClick={handleLogout} sx={{ color: 'text.secondary', mb: 1 }}>
+          <IconButton onClick={handleLogout} sx={{ color: 'text.secondary' }}>
             <LogoutIcon />
           </IconButton>
         </Tooltip>
       </Box>
 
-      {/* Main content */}
-      <Box sx={{ flex: 1, overflow: 'auto' }}>
+      {/* --- ОСНОВНОЙ КОНТЕНТ --- */}
+      <Box sx={{ flex: 1, height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
         {children}
       </Box>
+
+      {/* Окно профиля */}
+      <ProfileDialog open={profileOpen} onClose={() => setProfileOpen(false)} />
     </Box>
   );
 }

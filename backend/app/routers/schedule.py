@@ -6,11 +6,18 @@ import httpx
 from ..services.google_calendar import get_google_service, ensure_chronella_calendar, upsert_event
 from ..database import get_db
 from ..auth_utils import get_current_user
-from ..models import User, Event
+from ..models import User, Event, ControlPoint, Discipline
 from ..schemas import EventOut, EventVisitUpdate, EventCreate
 from ..core.security import decrypt_password
 from ..services.mrsu_auth import mrsu_service#, upsert_event, get_google_service, ensure_chronella_calendar,
+from ..services.google_calendar import (
+    get_google_service, 
+    ensure_chronella_calendar, 
+    upsert_event, 
+    delete_event
+)
 from app.services.analytics import analyze_weekly_workload
+from google.auth.exceptions import RefreshError
 
 router = APIRouter(prefix="/schedule", tags=["Schedule"])
 
@@ -146,23 +153,46 @@ async def sync_single_date(date_str: str, user: User, db: Session, token: str) -
 
 @router.get("/analytics/week")
 def get_week_analytics(
-    date: str = Query(..., description="Дата, формат YYYY-MM-DD"),
+    date: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # Вычисляем начало и конец недели так же, как в get_week_schedule
-    day = datetime.strptime(date, "%Y-%m-%d")
-    week_start = day - timedelta(days=day.weekday())
-    week_end = week_start + timedelta(days=7)
+    try:
+        target_date = datetime.strptime(date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Expected YYYY-MM-DD")
 
-    # Запрашиваем события напрямую
+    # Ищем понедельник (начало недели) для переданной даты
+    week_start = target_date - timedelta(days=target_date.weekday())
+    week_end = week_start + timedelta(days=7)
+    week_start_str = week_start.strftime("%Y-%m-%d")
+
+    # 1. Собираем пары/события из расписания
     events = db.query(Event).filter(
         Event.user_id == current_user.id,
         Event.start_at >= week_start,
         Event.start_at < week_end
     ).all()
-    
-    analysis = analyze_weekly_workload(events)
+
+    payload = [{"type": e.type, "start_at": e.start_at, "end_at": e.end_at} for e in events]
+
+    # 2. Собираем дедлайны по контрольным точкам
+    cps = db.query(ControlPoint).join(Discipline).filter(
+        Discipline.user_id == current_user.id,
+        ControlPoint.deadline >= week_start,
+        ControlPoint.deadline < week_end
+    ).all()
+
+    for cp in cps:
+        # Эмулируем 2 часа нагрузки на дедлайн
+        payload.append({
+            "type": "deadline",
+            "start_at": cp.deadline - timedelta(hours=2),
+            "end_at": cp.deadline
+        })
+
+    # 3. Передаем собранный payload и строку начала недели в сервис аналитики
+    analysis = analyze_weekly_workload(payload, week_start_str)
     return analysis
 
 @router.patch("/{event_id}", response_model=list[EventOut])
@@ -370,39 +400,47 @@ def delete_event(
 async def export_to_google(
     date_from: str = Query(...),
     date_to: str = Query(...),
-    types: str = Query(...),  # "lecture,practice,exam"
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if not current_user.is_google_verified:
+    if not current_user.google_refresh_token:
         raise HTTPException(status_code=400, detail="Google not linked")
 
-    type_list = types.split(',')
     start = datetime.strptime(date_from, "%Y-%m-%d")
     end = datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1)
 
     events = db.query(Event).filter(
         Event.user_id == current_user.id,
         Event.start_at >= start,
-        Event.start_at < end,
-        Event.type.in_(type_list)
+        Event.start_at < end
     ).all()
 
-    service = get_google_service(current_user.google_refresh_token)
-    calendar_id = current_user.google_calendar_id
-    if not calendar_id:
-        calendar_id = ensure_chronella_calendar(service)
-        current_user.google_calendar_id = calendar_id
+    try:
+        service = get_google_service(current_user)
+        calendar_id = current_user.google_calendar_id
+        
+        if not calendar_id:
+            calendar_id = ensure_chronella_calendar(service)
+            current_user.google_calendar_id = calendar_id
+            db.commit()
+
+        exported = 0
+        for event in events:
+            try:
+                gid = upsert_event(service, calendar_id, event, event.google_event_id)
+                event.google_event_id = gid
+                exported += 1
+            except Exception as e:
+                print(f"Export error {event.id}: {e}")
+
         db.commit()
+        return {"exported": exported}
 
-    exported = 0
-    for event in events:
-        try:
-            gid = upsert_event(service, calendar_id, event, event.google_event_id)
-            event.google_event_id = gid
-            exported += 1
-        except Exception as e:
-            print(f"Export error {event.id}: {e}")
-
-    db.commit()
-    return {"exported": exported}
+    except RefreshError:
+        current_user.is_google_verified = False
+        current_user.google_refresh_token = None
+        db.commit()
+        raise HTTPException(status_code=401, detail="Google token expired or revoked. Please relink.")
+    except Exception as e:
+        print(f"Google Calendar Error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to export to Google Calendar")

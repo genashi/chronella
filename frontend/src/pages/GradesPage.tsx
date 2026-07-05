@@ -1,31 +1,298 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Box, Typography, Card, Divider, List, ListItem, ListItemButton, ListItemText, 
-  Skeleton, Stack, Chip, LinearProgress, MenuItem, Select, TextField, Paper,
-  Checkbox, FormControlLabel // Добавили новые компоненты
+import {
+  Box, Typography, Card, Divider, Skeleton, Stack, LinearProgress,
+  MenuItem, Select, TextField, Paper, Checkbox, FormControlLabel,
+  CardContent, Button, CircularProgress
 } from '@mui/material';
-import { School as GradesIcon, ChevronRight, AssignmentOutlined } from '@mui/icons-material';
+import { School as GradesIcon, AssignmentOutlined, Assessment as AssessmentIcon } from '@mui/icons-material';
 import AppLayout from '../components/AppLayout';
 
 const API_URL = 'http://localhost:8000';
 
+// ─── Карточка аналитики ────────────────────────────────────────────────────
+
+function PerformanceAnalysis({
+  data, loading, onAnalyze
+}: {
+  data: any, loading: boolean, onAnalyze: () => void
+}) {
+  const indexColor = (val: number | null) => {
+    if (val === null) return 'text.secondary';
+    if (val >= 0.8) return 'success.main';
+    if (val >= 0.6) return 'warning.main';
+    return 'error.main';
+  };
+
+  const metrics = data ? [
+    {
+      label: 'Посещаемость',
+      hint: data.total_att > 0 ? `${data.visited} из ${data.total_att} занятий` : 'Нет данных о парах',
+      value: data.ap !== null ? `${(data.ap * 100).toFixed(0)}%` : '—',
+      color: indexColor(data.ap),
+    },
+    {
+      label: 'Успеваемость',
+      hint: data.current_score > 0 ? `${data.current_score} баллов набрано` : 'Нет оценок',
+      value: data.g_norm !== null ? `${(data.g_norm * 100).toFixed(0)}%` : '—',
+      color: indexColor(data.g_norm),
+    },
+    {
+      label: 'Дедлайны',
+      hint: data.total_dl > 0 ? `${data.on_time} из ${data.total_dl} сдано в срок` : 'Нет заданий',
+      value: data.dp !== null ? `${(data.dp * 100).toFixed(0)}%` : '—',
+      color: indexColor(data.dp),
+    },
+  ] : [];
+
+  return (
+    <Card elevation={0} sx={{
+      border: '1px solid', borderColor: 'divider', borderRadius: 3,
+      bgcolor: 'var(--md-sys-color-surface-container-lowest)',
+      minHeight: 200, display: 'flex', flexDirection: 'column',
+    }}>
+      <CardContent sx={{ p: 3, flex: 1, display: 'flex', flexDirection: 'column' }}>
+        <Typography variant="h6" sx={{ fontFamily: 'EB Garamond, serif', mb: 0.5 }}>
+          Анализ активности
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ fontFamily: 'Inter', mb: 2, fontSize: '0.8rem' }}>
+          Посещаемость, успеваемость и соблюдение дедлайнов
+        </Typography>
+
+        {!data && !loading && (
+          <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1.5, py: 2 }}>
+            <AssessmentIcon sx={{ fontSize: 36, color: 'text.disabled' }} />
+            <Typography align="center" sx={{ fontSize: '0.82rem', color: 'text.secondary', fontFamily: 'Inter', maxWidth: 260, lineHeight: 1.6 }}>
+              Рассчитает вашу вовлечённость по этой дисциплине на основе посещаемости, оценок и дедлайнов.
+            </Typography>
+            <Button variant="contained" startIcon={<AssessmentIcon />} onClick={onAnalyze}
+              sx={{ borderRadius: 2, textTransform: 'none', fontFamily: 'Inter', boxShadow: 'none', mt: 0.5 }}>
+              Провести анализ
+            </Button>
+          </Box>
+        )}
+
+        {loading && (
+          <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', py: 3 }}>
+            <CircularProgress size={28} />
+          </Box>
+        )}
+
+        {data && !loading && (
+          <>
+            <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 1, mb: 2.5 }}>
+              {metrics.map(m => (
+                <Box key={m.label} sx={{ bgcolor: 'var(--md-sys-color-surface-container)', borderRadius: 2, p: 1.5 }}>
+                  <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary', fontFamily: 'Inter', mb: 0.5 }}>
+                    {m.label}
+                  </Typography>
+                  <Typography sx={{ fontSize: '1.2rem', fontFamily: 'Inter', fontWeight: 600, color: m.color }}>
+                    {m.value}
+                  </Typography>
+                  <Typography sx={{ fontSize: '0.68rem', color: 'text.disabled', fontFamily: 'Inter', mt: 0.25, lineHeight: 1.3 }}>
+                    {m.hint}
+                  </Typography>
+                </Box>
+              ))}
+            </Box>
+
+            <Divider sx={{ mb: 2 }} />
+
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
+              <Box sx={{ flex: 1 }}>
+                <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary', fontFamily: 'Inter', mb: 0.5 }}>
+                  Общий индекс активности
+                </Typography>
+                <Typography sx={{ fontSize: '0.72rem', color: 'text.disabled', fontFamily: 'Inter', lineHeight: 1.5 }}>
+                  {data.level}
+                </Typography>
+              </Box>
+              <Typography variant="h4" sx={{ fontFamily: 'Inter', fontWeight: 800, color: indexColor(data.index), flexShrink: 0 }}>
+                {data.index !== null ? `${(data.index * 100).toFixed(0)}%` : '—'}
+              </Typography>
+            </Box>
+
+            <Button fullWidth variant="outlined" size="small" onClick={onAnalyze}
+              sx={{ mt: 2, borderRadius: 2, textTransform: 'none', fontFamily: 'Inter' }}>
+              Обновить расчёт
+            </Button>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Карточка контрольной точки ───────────────────────────────────────────
+
+function ControlDotCard({ dot, onUpdate }: { dot: any, onUpdate: (id: number, field: string, val: any) => void }) {
+  const hasMark = dot.Mark?.Ball > 0;
+  const markPct = hasMark ? Math.round((dot.Mark.Ball / dot.MaxBall) * 100) : null;
+  const markColor = markPct === null ? 'text.disabled'
+    : markPct >= 80 ? 'success.main'
+    : markPct >= 60 ? 'warning.main'
+    : 'error.main';
+
+  return (
+    <Paper variant="outlined" sx={{
+      borderRadius: 3, overflow: 'hidden',
+      transition: '0.15s', '&:hover': { borderColor: 'primary.light' }
+    }}>
+      {/* Верх: название + балл */}
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 2.5, pt: 2, pb: 1.5 }}>
+        <Typography sx={{ fontFamily: 'Inter', fontWeight: 600, fontSize: '0.9rem', lineHeight: 1.3, flex: 1, minWidth: 0, mr: 2 }}>
+          {dot.Title}
+        </Typography>
+        <Box sx={{ textAlign: 'right', flexShrink: 0 }}>
+          <Typography sx={{ fontFamily: 'Inter', fontWeight: 700, fontSize: '1.15rem', color: markColor, lineHeight: 1 }}>
+            {hasMark ? dot.Mark.Ball : '—'}
+            <Typography component="span" sx={{ fontFamily: 'Inter', fontWeight: 400, fontSize: '0.78rem', color: 'text.disabled', ml: 0.5 }}>
+              / {dot.MaxBall}
+            </Typography>
+          </Typography>
+          {hasMark && (
+            <Typography sx={{ fontSize: '0.68rem', color: markColor, fontFamily: 'Inter', mt: 0.25 }}>
+              {markPct}% от максимума
+            </Typography>
+          )}
+        </Box>
+      </Box>
+
+      {/* Низ: контролы */}
+      <Box sx={{
+        display: 'flex', alignItems: 'center', gap: 1.5,
+        px: 2.5, py: 1.25,
+        bgcolor: 'var(--md-sys-color-surface-container)',
+        borderTop: '1px solid', borderColor: 'divider'
+      }}>
+        <Select
+          size="small"
+          defaultValue={dot.custom_type || 'lab'}
+          onChange={(e) => onUpdate(dot.db_id, 'type', e.target.value)}
+          sx={{ height: 32, fontSize: '0.78rem', borderRadius: 2, minWidth: 130 }}
+        >
+          <MenuItem value="control">Контрольная</MenuItem>
+          <MenuItem value="lab">Лабораторная</MenuItem>
+          <MenuItem value="test">Тест</MenuItem>
+          <MenuItem value="exam">Зачёт / Экзамен</MenuItem>
+        </Select>
+
+        <TextField
+          type="date"
+          size="small"
+          label="Дедлайн"
+          InputLabelProps={{ shrink: true }}
+          defaultValue={dot.custom_deadline || ''}
+          onChange={(e) => onUpdate(dot.db_id, 'deadline', e.target.value)}
+          sx={{ '& .MuiInputBase-input': { fontSize: '0.78rem', height: 16 }, width: 148 }}
+        />
+
+        <FormControlLabel
+          control={
+            <Checkbox
+              size="small"
+              defaultChecked={dot.custom_is_late === false}
+              onChange={(e) => onUpdate(dot.db_id, 'is_late', !e.target.checked)}
+            />
+          }
+          label={
+            <Typography sx={{ fontSize: '0.78rem', fontFamily: 'Inter', color: 'text.secondary' }}>
+              Сдано вовремя
+            </Typography>
+          }
+          sx={{ mr: 0 }}
+        />
+      </Box>
+    </Paper>
+  );
+}
+
+// ─── Блок итоговой аттестации ─────────────────────────────────────────────
+
+function ExamBlock({ dots, onUpdate }: { dots: any[], onUpdate: (id: number, field: string, val: any) => void }) {
+  return (
+    <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 3, overflow: 'hidden' }}>
+      {/* Шапка с датой — одна на весь блок */}
+      <Box sx={{
+        px: 2.5, py: 1.5, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        bgcolor: 'var(--md-sys-color-surface-container)',
+        borderBottom: '1px solid', borderColor: 'divider'
+      }}>
+        <Typography sx={{
+          fontSize: '0.72rem', fontWeight: 600, fontFamily: 'Inter',
+          color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.6px'
+        }}>
+          Итоговая аттестация
+        </Typography>
+        <TextField
+          type="date"
+          size="small"
+          label="Дата проведения"
+          InputLabelProps={{ shrink: true }}
+          defaultValue={dots[0]?.custom_deadline || ''}
+          onChange={(e) => dots.forEach(dot => onUpdate(dot.db_id, 'deadline', e.target.value))}
+          sx={{ '& .MuiInputBase-input': { fontSize: '0.78rem', height: 16 }, width: 175 }}
+        />
+      </Box>
+
+      {/* Точки */}
+      <Stack spacing={0} divider={<Divider />}>
+        {dots.map((dot: any) => {
+          const hasMark = dot.Mark?.Ball > 0;
+          const markPct = hasMark ? Math.round((dot.Mark.Ball / dot.MaxBall) * 100) : null;
+          const markColor = markPct === null ? 'text.disabled'
+            : markPct >= 80 ? 'success.main'
+            : markPct >= 60 ? 'warning.main'
+            : 'error.main';
+
+          return (
+            <Box key={dot.Id} sx={{ px: 2.5, py: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Box sx={{ flex: 1, minWidth: 0, mr: 2 }}>
+                <Typography sx={{ fontFamily: 'Inter', fontWeight: 600, fontSize: '0.9rem', lineHeight: 1.3 }}>
+                  {dot.Title}
+                </Typography>
+                <Typography sx={{ fontSize: '0.72rem', color: 'text.disabled', fontFamily: 'Inter', mt: 0.25 }}>
+                  Максимум: {dot.MaxBall} б.
+                </Typography>
+              </Box>
+              <Box sx={{ textAlign: 'right', flexShrink: 0 }}>
+                <Typography sx={{ fontFamily: 'Inter', fontWeight: 700, fontSize: '1.15rem', color: markColor, lineHeight: 1 }}>
+                  {hasMark ? dot.Mark.Ball : '—'}
+                  <Typography component="span" sx={{ fontFamily: 'Inter', fontWeight: 400, fontSize: '0.78rem', color: 'text.disabled', ml: 0.5 }}>
+                    / {dot.MaxBall}
+                  </Typography>
+                </Typography>
+                {hasMark && (
+                  <Typography sx={{ fontSize: '0.68rem', color: markColor, fontFamily: 'Inter', mt: 0.25 }}>
+                    {markPct}% от максимума
+                  </Typography>
+                )}
+              </Box>
+            </Box>
+          );
+        })}
+      </Stack>
+    </Box>
+  );
+}
+
+// ─── Главная страница ──────────────────────────────────────────────────────
+
 export default function GradesPage() {
   const [disciplines, setDisciplines] = useState<any[]>([]);
   const [selectedPlan, setSelectedPlan] = useState<any>(null);
+  const [analyticsData, setAnalyticsData] = useState<any>(null);
   const [loadingList, setLoadingList] = useState(true);
   const [loadingPlan, setLoadingPlan] = useState(false);
+  const [loadingAnalytics, setLoadingAnalytics] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
-  const getStatusColor = (points: number) => {
-    if (points < 40) return '#B3261E'; // Error
-    if (points < 61) return '#F9A825'; // Warning
-    return '#2E7D32'; // Success
+  const pointColor = (pts: number) => {
+    if (pts < 40) return '#B3261E';
+    if (pts < 61) return '#F9A825';
+    return '#2E7D32';
   };
 
-  useEffect(() => {
-    fetchDisciplines();
-  }, []);
+  useEffect(() => { fetchDisciplines(); }, []);
 
   const fetchDisciplines = async () => {
     try {
@@ -37,220 +304,214 @@ export default function GradesPage() {
       const data = await res.json();
       setDisciplines(data);
       if (data.length > 0) handleSelect(data[0]);
-    } catch (err: any) { setError(err.message); }
+    } catch (e) { console.error(e); }
     finally { setLoadingList(false); }
+  };
+
+  const loadAnalytics = async (mrsu_id: string) => {
+    setLoadingAnalytics(true);
+    try {
+      const token = localStorage.getItem('access_token');
+      const res = await fetch(`${API_URL}/performance/discipline/${mrsu_id}/analytics`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) setAnalyticsData(await res.json());
+    } catch (e) { console.error(e); }
+    finally { setLoadingAnalytics(false); }
+  };
+
+  const triggerAnalyze = () => {
+    const d = disciplines.find(d => d.id === selectedId);
+    if (d) loadAnalytics(d.mrsu_id);
   };
 
   const handleSelect = async (discipline: any) => {
     setSelectedId(discipline.id);
     setLoadingPlan(true);
+    setAnalyticsData(null);
     try {
       const token = localStorage.getItem('access_token');
       const res = await fetch(`${API_URL}/performance/discipline/${discipline.mrsu_id}/plan`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      const data = await res.json();
-      setSelectedPlan(data);
+      setSelectedPlan(await res.json());
     } catch (e) { console.error(e); }
     finally { setLoadingPlan(false); }
   };
 
-  // Обновили тип value на any, чтобы принимать bool от чекбокса
-  const handleUpdateDot = async (dbId: number, field: 'type' | 'deadline' | 'is_late', value: any) => {
+  const handleUpdateDot = async (dbId: number, field: string, value: any) => {
     try {
       const token = localStorage.getItem('access_token');
       await fetch(`${API_URL}/performance/control-points/${dbId}`, {
         method: 'PATCH',
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ [field]: value })
       });
-    } catch (e) {
-      console.error("Ошибка сохранения:", e);
-    }
+      if (analyticsData) triggerAnalyze();
+    } catch (e) { console.error(e); }
   };
 
-  const totalPoints = selectedPlan?.Sections?.reduce((acc: number, sec: any) => 
-    acc + sec.ControlDots?.reduce((dotAcc: number, dot: any) => dotAcc + (dot.Mark?.Ball || 0), 0), 0
-  ) || 0;
-
-  // Функция проверки, является ли раздел экзаменом/зачетом
-  const isExamSection = (title: string) => {
-    const t = title.toLowerCase();
-    return t.includes('экзамен') || t.includes('зачет') || t.includes('аттестация');
-  };
+  const totalPoints = selectedPlan?.Sections?.reduce((acc: number, sec: any) =>
+    acc + (sec.ControlDots?.reduce((s: number, d: any) => s + (d.Mark?.Ball || 0), 0) ?? 0), 0
+  ) ?? 0;
 
   return (
     <AppLayout>
-      <Box sx={{ p: 3, maxWidth: 1200, mx: 'auto' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 3 }}>
-          <GradesIcon sx={{ color: 'primary.main', fontSize: 26 }} />
-          <Typography variant="h5" sx={{ fontFamily: 'Lora, serif' }}>Успеваемость</Typography>
+      <Box sx={{ p: { xs: 2, md: 4 }, flex: 1, display: 'flex', flexDirection: 'column', width: '100%' }}>
+
+        {/* Заголовок страницы */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 4 }}>
+          <GradesIcon sx={{ color: 'primary.main', fontSize: 28 }} />
+          <Typography variant="h4" sx={{ fontFamily: 'Lora, serif' }}>Успеваемость</Typography>
         </Box>
 
-        <Box sx={{ display: 'flex', gap: 3, flexDirection: { xs: 'column', md: 'row' } }}>
-          
-          <Box sx={{ width: { xs: '100%', md: 350 }, flexShrink: 0 }}>
-            <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 4, overflow: 'hidden' }}>
-              <List sx={{ p: 0 }}>
-                {loadingList ? (
-                  [1, 2, 3, 4].map(i => <Box key={i} sx={{ p: 2 }}><Skeleton variant="text" height={30} /></Box>)
-                ) : disciplines.map((d, idx) => (
-                  <React.Fragment key={d.id}>
-                    <ListItem disablePadding>
-                      <ListItemButton 
-                        selected={selectedId === d.id}
+        {/* Двухколоночный layout */}
+        <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 3, flex: 1, alignItems: 'flex-start' }}>
+
+          {/* ── Левая колонка: список дисциплин ── */}
+          <Box sx={{ width: { xs: '100%', md: 360 }, flexShrink: 0 }}>
+            <Typography sx={{
+              fontFamily: 'Inter', fontWeight: 700, fontSize: '0.7rem',
+              color: 'text.disabled', textTransform: 'uppercase', letterSpacing: '0.8px',
+              px: 0.5, mb: 1.5, display: 'block'
+            }}>
+              Дисциплины
+            </Typography>
+
+            <Stack spacing={1}>
+              {loadingList
+                ? [1, 2, 3, 4].map(i => (
+                    <Skeleton key={i} variant="rectangular" height={48} sx={{ borderRadius: 3 }} />
+                  ))
+                : disciplines.map(d => {
+                    const isSelected = selectedId === d.id;
+
+                    return (
+                      <Card
+                        key={d.id}
+                        elevation={0}
                         onClick={() => handleSelect(d)}
-                        sx={{ py: 2, '&.Mui-selected': { bgcolor: 'var(--md-sys-color-primary-container)' } }}
+                        sx={{
+                          border: '1px solid',
+                          borderColor: isSelected ? 'primary.main' : 'divider',
+                          borderRadius: 3, cursor: 'pointer',
+                          bgcolor: isSelected
+                            ? 'var(--md-sys-color-primary-container)'
+                            : 'var(--md-sys-color-surface-container-lowest)',
+                          transition: '0.15s',
+                          '&:hover': { borderColor: 'primary.light' }
+                        }}
                       >
-                        <ListItemText 
-                          primary={d.name} 
-                          primaryTypographyProps={{ fontFamily: 'Inter', fontWeight: 500, fontSize: '0.9rem' }}
-                        />
-                        <ChevronRight fontSize="small" sx={{ color: 'text.disabled' }} />
-                      </ListItemButton>
-                    </ListItem>
-                    {idx < disciplines.length - 1 && <Divider />}
-                  </React.Fragment>
-                ))}
-              </List>
-            </Card>
+                        <CardContent sx={{ p: 1.75, '&:last-child': { pb: 1.75 } }}>
+                          <Typography sx={{
+                            fontFamily: 'Inter', fontWeight: 600, fontSize: '0.85rem',
+                            lineHeight: 1.3,
+                            color: isSelected ? 'primary.main' : 'text.primary'
+                          }}>
+                            {d.name}
+                          </Typography>
+                        </CardContent>
+                      </Card>
+                    );
+                  })
+              }
+            </Stack>
           </Box>
 
-          <Box sx={{ flex: 1 }}>
-            <Card elevation={0} sx={{ 
-              border: '1px solid', borderColor: 'divider', borderRadius: 4, 
-              p: 4, minHeight: 600, bgcolor: 'var(--md-sys-color-surface-container-low)'
-            }}>
-              {loadingPlan ? (
-                <Stack spacing={2} sx={{ width: '100%' }}>
-                  <Skeleton variant="rectangular" height={60} sx={{ borderRadius: 2 }} />
-                  <Skeleton variant="rectangular" height={200} sx={{ borderRadius: 2 }} />
-                </Stack>
-              ) : selectedPlan ? (
-                <Box>
-                  <Box sx={{ mb: 4 }}>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', mb: 1.5 }}>
-                      <Typography variant="h6" sx={{ fontFamily: 'Lora', fontWeight: 600 }}>
+          {/* ── Правая часть: детали дисциплины ── */}
+          <Box sx={{ flex: 1, maxWidth: { md: 760 }, width: '100%', minWidth: 0 }}>
+            {loadingPlan ? (
+              <Stack spacing={2}>
+                <Skeleton variant="rectangular" height={88} sx={{ borderRadius: 3 }} />
+                <Skeleton variant="rectangular" height={200} sx={{ borderRadius: 3 }} />
+                <Skeleton variant="rectangular" height={300} sx={{ borderRadius: 3 }} />
+              </Stack>
+            ) : selectedPlan ? (
+              <Stack spacing={3}>
+
+                {/* Шапка: название + прогресс баллов */}
+                <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 3, overflow: 'hidden' }}>
+                  <Box sx={{ px: 3, pt: 2.5, pb: 2 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', mb: 1.5 }}>
+                      <Typography variant="h6" sx={{ fontFamily: 'Lora', fontWeight: 600, lineHeight: 1.3, maxWidth: '65%' }}>
                         {disciplines.find(d => d.id === selectedId)?.name}
                       </Typography>
-                      <Typography variant="h5" sx={{ fontFamily: 'Inter', fontWeight: 700, color: getStatusColor(totalPoints) }}>
-                        {totalPoints.toFixed(1)} <Typography component="span" variant="body1" color="text.secondary">/ 100</Typography>
-                      </Typography>
+                      <Box sx={{ textAlign: 'right' }}>
+                        <Typography sx={{ fontFamily: 'Inter', fontWeight: 800, fontSize: '1.6rem', color: pointColor(totalPoints), lineHeight: 1 }}>
+                          {totalPoints.toFixed(1)}
+                          <Typography component="span" sx={{ fontFamily: 'Inter', fontWeight: 400, fontSize: '0.85rem', color: 'text.disabled', ml: 0.75 }}>
+                            / 100
+                          </Typography>
+                        </Typography>
+                        <Typography sx={{ fontSize: '0.7rem', color: 'text.disabled', fontFamily: 'Inter', mt: 0.25 }}>
+                          баллов набрано
+                        </Typography>
+                      </Box>
                     </Box>
-                    <LinearProgress 
-                      variant="determinate" 
-                      value={Math.min(totalPoints, 100)} 
-                      sx={{ 
-                        height: 10, borderRadius: 5, bgcolor: 'rgba(0,0,0,0.05)',
-                        '& .MuiLinearProgress-bar': { bgcolor: getStatusColor(totalPoints) }
-                      }} 
+                    <LinearProgress
+                      variant="determinate"
+                      value={Math.min(totalPoints, 100)}
+                      sx={{
+                        height: 6, borderRadius: 4, bgcolor: 'rgba(0,0,0,0.06)',
+                        '& .MuiLinearProgress-bar': { bgcolor: pointColor(totalPoints) }
+                      }}
                     />
                   </Box>
+                </Card>
 
-                  <Stack spacing={4}>
-                    {selectedPlan.Sections?.map((section: any) => {
-                      const regularDots = section.ControlDots?.filter((dot: any) => dot.custom_type !== 'exam') || [];
-                      const examDots = section.ControlDots?.filter((dot: any) => dot.custom_type === 'exam') || [];
+                {/* Карточка аналитики */}
+                <PerformanceAnalysis
+                  data={analyticsData}
+                  loading={loadingAnalytics}
+                  onAnalyze={triggerAnalyze}
+                />
 
-                      return (
-                        <Box key={section.Id} sx={{ mb: 4 }}>
-                          {regularDots.length > 0 && (
-                            <>
-                              <Typography variant="overline" sx={{ fontWeight: 800, color: 'primary.main', mb: 1, display: 'block' }}>
-                                {section.Title}
-                              </Typography>
-                              <Stack spacing={1.5} sx={{ mb: examDots.length > 0 ? 2 : 0 }}>
-                                {regularDots.map((dot: any) => (
-                                  <Paper key={dot.Id} variant="outlined" sx={{ 
-                                    p: 2, borderRadius: 3, display: 'flex', alignItems: 'center', gap: 2,
-                                    transition: '0.2s', '&:hover': { borderColor: 'primary.main' }
-                                  }}>
-                                    <Box sx={{ flex: 1 }}>
-                                      <Typography variant="body2" sx={{ fontWeight: 600, fontFamily: 'Inter' }}>{dot.Title}</Typography>
-                                      <Typography variant="caption" color="text.secondary">Макс. балл: {dot.MaxBall}</Typography>
-                                    </Box>
-                                    <Stack direction="row" spacing={2} alignItems="center">
-                                      <Select 
-                                        size="small" 
-                                        defaultValue={dot.custom_type || "lab"} 
-                                        onChange={(e) => handleUpdateDot(dot.db_id, 'type', e.target.value)}
-                                        sx={{ height: 35, fontSize: '0.8rem', borderRadius: 2, minWidth: 130 }}
-                                      >
-                                        <MenuItem value="control">Контрольная</MenuItem>
-                                        <MenuItem value="lab">Лабораторная</MenuItem>
-                                        <MenuItem value="test">Тест</MenuItem>
-                                        <MenuItem value="exam">Зачет/Экзамен</MenuItem>
-                                      </Select>
-                                      <TextField 
-                                        type="date"
-                                        size="small"
-                                        defaultValue={dot.custom_deadline || ""}
-                                        onChange={(e) => handleUpdateDot(dot.db_id, 'deadline', e.target.value)}
-                                        sx={{ '& .MuiInputBase-input': { fontSize: '0.8rem', height: 18 } }}
-                                      />
-                                      <FormControlLabel
-                                        control={
-                                          <Checkbox 
-                                            size="small" 
-                                            defaultChecked={dot.custom_is_late === false} 
-                                            onChange={(e) => handleUpdateDot(dot.db_id, 'is_late', !e.target.checked)}
-                                          />
-                                        }
-                                        label={<Typography variant="caption" sx={{ fontFamily: 'Inter' }}>Сдано вовремя</Typography>}
-                                        sx={{ mr: 0 }}
-                                      />
-                                      <Chip label={dot.Mark?.Ball ? `${dot.Mark.Ball} баллов` : "Нет оценки"} color={dot.Mark?.Ball ? "success" : "default"} size="small" variant={dot.Mark?.Ball ? "filled" : "outlined"} sx={{ fontWeight: 600, minWidth: 80 }} />
-                                    </Stack>
-                                  </Paper>
-                                ))}
-                              </Stack>
-                            </>
-                          )}
+                {/* Секции с контрольными точками */}
+                {selectedPlan.Sections?.map((section: any) => {
+                  const regularDots = section.ControlDots?.filter((d: any) => d.custom_type !== 'exam') ?? [];
+                  const examDots    = section.ControlDots?.filter((d: any) => d.custom_type === 'exam')  ?? [];
 
-                          {examDots.length > 0 && (
-                            <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 4, bgcolor: 'var(--md-sys-color-error-container)', borderColor: 'error.light', borderWidth: '1px', borderStyle: 'solid' }}>
-                              <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'error.main', mb: 1.5, fontFamily: 'Inter', textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: '0.5px' }}>
-                                Итоговая аттестация по разделу
-                              </Typography>
-                              <Stack spacing={1.5}>
-                                {examDots.map((dot: any) => (
-                                  <Box key={dot.Id} sx={{ display: 'flex', alignItems: 'center', justify_content: 'space-between', gap: 2, p: 1.5, bgcolor: 'var(--md-sys-color-surface-container-lowest)', borderRadius: 3, border: '1px solid', borderColor: 'divider' }}>
-                                    <Box sx={{ flex: 1 }}>
-                                      <Typography variant="body2" sx={{编程Текст: 'Inter', fontWeight: 600 }}>{dot.Title}</Typography>
-                                      <Typography variant="caption" color="text.secondary">Максимально: {dot.MaxBall} б.</Typography>
-                                    </Box>
-                                    <Stack direction="row" spacing={2} alignItems="center">
-                                      <TextField 
-                                        type="date"
-                                        size="small"
-                                        label="Дата проведения"
-                                        InputLabelProps={{ shrink: true }}
-                                        defaultValue={dot.custom_deadline || ""}
-                                        onChange={(e) => handleUpdateDot(dot.db_id, 'deadline', e.target.value)}
-                                        sx={{ '& .MuiInputBase-input': { fontSize: '0.8rem', height: 18 }, width: 160 }}
-                                      />
-                                      <Chip label={dot.Mark?.Ball ? `${dot.Mark.Ball} баллов` : "Нет оценки"} color={dot.Mark?.Ball ? "success" : "default"} size="small" variant={dot.Mark?.Ball ? "filled" : "outlined"} sx={{ fontWeight: 600, minWidth: 80 }} />
-                                    </Stack>
-                                  </Box>
-                                ))}
-                              </Stack>
-                            </Paper>
-                          )}
+                  return (
+                    <Box key={section.Id}>
+                      {regularDots.length > 0 && (
+                        <Box sx={{ mb: examDots.length > 0 ? 2 : 0 }}>
+                          {/* Заголовок секции */}
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+                            <Box sx={{ width: 3, height: 14, bgcolor: 'primary.main', borderRadius: 4, flexShrink: 0 }} />
+                            <Typography sx={{
+                              fontFamily: 'Inter', fontWeight: 600, fontSize: '0.78rem',
+                              color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.5px'
+                            }}>
+                              {section.Title}
+                            </Typography>
+                          </Box>
+
+                          <Stack spacing={1.5}>
+                            {regularDots.map((dot: any) => (
+                              <ControlDotCard key={dot.Id} dot={dot} onUpdate={handleUpdateDot} />
+                            ))}
+                          </Stack>
                         </Box>
-                      );
-                    })}
-                  </Stack>
-                </Box>
-              ) : (
-                <Stack alignItems="center" justifyContent="center" sx={{ height: 400, opacity: 0.5 }}>
-                  <AssignmentOutlined sx={{ fontSize: 48, mb: 2 }} />
-                  <Typography>Выберите предмет для просмотра деталей</Typography>
-                </Stack>
-              )}
-            </Card>
+                      )}
+
+                      {examDots.length > 0 && (
+                        <ExamBlock dots={examDots} onUpdate={handleUpdateDot} />
+                      )}
+                    </Box>
+                  );
+                })}
+              </Stack>
+            ) : (
+              <Stack alignItems="center" justifyContent="center" sx={{ minHeight: 500, opacity: 0.5 }}>
+                <AssignmentOutlined sx={{ fontSize: 56, mb: 2, color: 'text.secondary' }} />
+                <Typography variant="h6" sx={{ fontFamily: 'EB Garamond, serif', mb: 0.5 }}>
+                  Выберите дисциплину
+                </Typography>
+                <Typography variant="body2" sx={{ fontFamily: 'Inter', color: 'text.secondary' }}>
+                  Оценки, дедлайны и аналитика активности
+                </Typography>
+              </Stack>
+            )}
           </Box>
 
         </Box>

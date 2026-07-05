@@ -190,3 +190,71 @@ async def update_control_point(
 
     db.commit()
     return {"status": "ok"}
+
+@router.get("/discipline/{mrsu_id}/analytics")
+async def get_discipline_analytics(
+    mrsu_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    disc = db.query(Discipline).filter(
+        Discipline.mrsu_id == int(mrsu_id), 
+        Discipline.user_id == current_user.id
+    ).first()
+    
+    if not disc:
+        raise HTTPException(status_code=404, detail="Дисциплина не найдена")
+
+    # 1. Посещаемость (Ap)
+    events = db.query(Event).filter(Event.user_id == current_user.id, Event.eios_raw.isnot(None)).all()
+    disc_events = [e for e in events if isinstance(e.eios_raw, dict) and str(e.eios_raw.get('Id')) == str(disc.mrsu_id)]
+    visited = sum(1 for e in disc_events if e.is_visited is True)
+    missed = sum(1 for e in disc_events if e.is_visited is False)
+    total_att = visited + missed
+    ap = visited / total_att if total_att > 0 else None
+
+    # 2. Успеваемость (G) — ИСПРАВЛЕНО
+    cps = db.query(ControlPoint).filter(ControlPoint.discipline_id == disc.id).all()
+    valid_cps = [cp for cp in cps if cp.type != 'exam']
+    
+    current_score = sum(cp.score for cp in valid_cps if cp.score is not None)
+    # Накопительная система до 70 баллов
+    g_norm = min(current_score / 70.0, 1.0)
+
+    # 3. Своевременность (Dp)
+    total_dl = len(valid_cps)
+    on_time = sum(1 for cp in valid_cps if cp.is_late is False)
+    dp = on_time / total_dl if total_dl > 0 else None
+
+    # 4. Индекс активности (I)
+    W1, W2, W3 = 0.3, 0.5, 0.2
+    if ap is not None and dp is not None:
+        index = W1 * ap + W2 * g_norm + W3 * dp
+        weights_used = "w1=0.3, w2=0.5, w3=0.2"
+    elif dp is not None:
+        index = 0.7 * g_norm + 0.3 * dp
+        weights_used = "пар нет → w2=0.7, w3=0.3"
+    else:
+        index = g_norm
+        weights_used = "только оценки"
+
+    level = "нет данных"
+    if index is not None:
+        if index >= 0.8: level = "высокая вовлечённость, успеваемость в норме"
+        elif index >= 0.6: level = "удовлетворительный уровень, небольшие отклонения"
+        elif index >= 0.4: level = "низкая активность, системные проблемы"
+        else: level = "критический уровень — зона риска"
+
+    return {
+        "ap": ap,
+        "g_norm": g_norm,
+        "dp": dp,
+        "index": index,
+        "level": level,
+        "weights_used": weights_used,
+        "visited": visited,
+        "total_att": total_att,
+        "on_time": on_time,
+        "total_dl": total_dl,
+        "current_score": current_score
+    }

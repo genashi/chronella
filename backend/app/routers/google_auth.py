@@ -10,8 +10,7 @@ from ..models import User
 router = APIRouter(prefix="/auth/google", tags=["Google"])
 
 SCOPES = [
-    "https://www.googleapis.com/auth/calendar.events",
-    "https://www.googleapis.com/auth/calendar.readonly"
+    "https://www.googleapis.com/auth/calendar",
 ]
 
 def get_flow():
@@ -72,3 +71,23 @@ async def google_auth_callback(
     db.refresh(current_user)
 
     return {"status": "success", "message": "Google Calendar connected"}
+
+@router.get("/check")
+async def check_google_status(current_user: User = Depends(get_current_user)):
+    # Простая проверка: если токен пустой, значит привязки нет
+    is_linked = bool(current_user.google_refresh_token)
+    return {"is_linked": is_linked}
+
+@router.post("/disconnect")
+async def google_disconnect(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # Зануляем токены и статус привязки
+    current_user.google_refresh_token = None
+    current_user.is_google_verified = False
+    current_user.google_calendar_id = None  # Если сохранял ID календаря Хронеллы
+    
+    db.commit()
+    db.refresh(current_user)
+    return {"status": "success", "message": "Google Calendar успешно отключен"}
